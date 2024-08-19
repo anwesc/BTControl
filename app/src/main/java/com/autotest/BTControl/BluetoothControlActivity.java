@@ -303,6 +303,10 @@ public class BluetoothControlActivity extends Activity {
                         Log.d("auto_action","配对");
                         BluetoothDevice device = discoveredDevicesMap.get(targetDeviceAddress);
                         if (device != null) {
+                            BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
+                            if (Objects.equals(device, connected_device)) {
+                                unpairDevice(device);
+                            }
                             pairDevice(device);
                             break;
                         }
@@ -535,7 +539,8 @@ public class BluetoothControlActivity extends Activity {
                         }
                     } else {
                         deviceInfo = "名称: " + deviceName + "\n地址: " + deviceAddress;
-                        if (!deviceList.contains(deviceInfo)) {
+                        BluetoothDevice connected_device = connectedDevicesMap.get(deviceAddress);
+                        if (!deviceList.contains(deviceInfo) && !Objects.equals(device, connected_device)) {
                             deviceList.add(deviceInfo);
                             discoveredDevicesMap.put(deviceAddress, device);
 
