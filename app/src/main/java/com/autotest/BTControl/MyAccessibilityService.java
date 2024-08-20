@@ -5,65 +5,71 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.util.Log;
 
-import java.util.Collection;
 import java.util.List;
 
 public class MyAccessibilityService extends AccessibilityService {
 
+    private static final String TAG = "MyAccessibilityService";
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         int eventType = event.getEventType();
-        Log.d("AccessibilityService", "event type: " + eventType);
+        Log.d(TAG, "Event type: " + eventType);
 
-        // 监听不同类型的事件
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-            AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-//            Log.d("AccessibilityService", "rootNode: " + rootNode);
+        // 监听窗口内容变化和窗口状态变化的事件
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+                eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
 
-            if (rootNode != null) {
-                // 打印节点树以调试
-//                printNodeTree(rootNode, 0);
+            handleWindowChangeEvent();
+        }
+    }
 
-                // 查找“配对”按钮
-                List<AccessibilityNodeInfo> nodes = findPairButton(rootNode);
+    private void handleWindowChangeEvent() {
+        AccessibilityNodeInfo rootNode = getRootInActiveWindow();
 
-                for (AccessibilityNodeInfo node : nodes) {
-//                    Log.d("node", String.valueOf(node));
-                    if (node.isClickable() && node.getText().toString().contains("配对") && !node.getText().toString().contains("已配对")) {
-                        // 点击“配对”按钮
-                        node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                        Log.d("ACTION_CLICK", node.getText().toString());
-                        return;
-                    }
-//                    else {
-//                        Log.d("AccessibilityService", "未找到配对按钮");
-//                }
+        if (rootNode != null) {
+            // 查找“配对”按钮
+            List<AccessibilityNodeInfo> nodes = findPairButton(rootNode);
+
+            for (AccessibilityNodeInfo node : nodes) {
+                CharSequence text = node.getText();
+                if (node.isClickable() && text != null && text.toString().contains("配对") && !text.toString().contains("已配对")) {
+                    // 点击“配对”按钮
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    Log.d(TAG, "ACTION_CLICK: " + text.toString());
+                    return;
                 }
             }
         }
     }
 
-    // 打印节点树
+    // 打印节点树（可选，用于调试）
     private void printNodeTree(AccessibilityNodeInfo node, int depth) {
         if (node == null) return;
 
         String indent = new String(new char[depth]).replace("\0", "  ");
         CharSequence text = node.getText();
-        Log.d("AccessibilityService", indent + "Node: " + (text != null ? text.toString() : "no text"));
+        Log.d(TAG, indent + "Node: " + (text != null ? text.toString() : "no text"));
 
         for (int i = 0; i < node.getChildCount(); i++) {
             printNodeTree(node.getChild(i), depth + 1);
         }
     }
 
-
     private List<AccessibilityNodeInfo> findPairButton(AccessibilityNodeInfo rootNode) {
-        // 假设配对按钮的文本为“配对”，你可以根据实际情况修改
         return rootNode.findAccessibilityNodeInfosByText("配对");
     }
 
     @Override
     public void onInterrupt() {
         // 处理服务中断
+        Log.d(TAG, "Service Interrupted");
+    }
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        // 配置服务的属性
+        Log.d(TAG, "Service Connected");
     }
 }
