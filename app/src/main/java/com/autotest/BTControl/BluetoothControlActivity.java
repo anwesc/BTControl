@@ -307,13 +307,22 @@ public class BluetoothControlActivity extends Activity {
         new Thread(() -> {
             long startTime = System.currentTimeMillis();
             while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD) {
+                Log.d("auto_action","正在执行自动任务");
                 if (targetDeviceAddress != null && !targetDeviceAddress.isEmpty()) {
                     if (Objects.equals(targetAction, "配对")){
+
                         BluetoothDevice device = discoveredDevicesMap.get(targetDeviceAddress);
                         if (device != null) {
+                            Log.d("targetdevice", device.getName());
                             BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
-                            if (Objects.equals(device, connected_device)) {
+                            if (connected_device != null) {
+                                Log.d("connected_device", connected_device.getName());
                                 unpairDevice(device);
+                                try {
+                                    Thread.sleep(100);
+                                } catch (InterruptedException e) {
+                                    throw new RuntimeException(e);
+                                }
                             }
                             pairDevice(device);
                             break;
@@ -543,16 +552,16 @@ public class BluetoothControlActivity extends Activity {
                         if (!nfdeviceList.contains(deviceInfo)) {
                             nfdeviceList.add(deviceInfo);
                             NFDevicesMap.put(deviceAddress, device);
-
                             runOnUiThread(() -> nfdeviceListAdapter.notifyDataSetChanged());
                         }
                     } else {
                         deviceInfo = "名称: " + deviceName + "\n地址: " + deviceAddress;
                         BluetoothDevice connected_device = connectedDevicesMap.get(deviceAddress);
-//                        if (!deviceList.contains(deviceInfo) && !(device==connected_device)) {
+                        if (!deviceList.contains(deviceInfo)){
+                            discoveredDevicesMap.put(deviceAddress, device);
+                        }
                         if (!deviceList.contains(deviceInfo) && !(Objects.equals(device, connected_device))) {
                             deviceList.add(deviceInfo);
-                            discoveredDevicesMap.put(deviceAddress, device);
                             runOnUiThread(() -> deviceListAdapter.notifyDataSetChanged());
                         }
                     }
