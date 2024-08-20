@@ -110,8 +110,17 @@ public class BluetoothControlActivity extends Activity {
         bluetoothAdapter = bluetoothManager.getAdapter();
 
         targetDeviceAddress = getIntent().getStringExtra("bluetooth_address");
+        if (targetDeviceAddress != null) {
+            Log.d("param",targetDeviceAddress);
+        }
         targetDeviceName = getIntent().getStringExtra("bluetooth_name");
+        if (targetDeviceName != null) {
+            Log.d("param",targetDeviceName);
+        }
         targetAction = getIntent().getStringExtra("auto_action");
+        if (targetAction != null){
+            Log.d("param",targetAction);
+        }
     }
 
     private void checkAndRequestPermissions() {
@@ -300,7 +309,6 @@ public class BluetoothControlActivity extends Activity {
             while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD) {
                 if (targetDeviceAddress != null && !targetDeviceAddress.isEmpty()) {
                     if (Objects.equals(targetAction, "配对")){
-                        Log.d("auto_action","配对");
                         BluetoothDevice device = discoveredDevicesMap.get(targetDeviceAddress);
                         if (device != null) {
                             BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
@@ -311,7 +319,7 @@ public class BluetoothControlActivity extends Activity {
                             break;
                         }
                     } else if (Objects.equals(targetAction, "连接")) {
-                        Log.d("auto_action","连接");
+                        updateConnectedDeviceLists();
                         BluetoothDevice device = connectedDevicesMap.get(targetDeviceAddress);
                         if (device != null) {
                             connectToDevice(device);
@@ -319,9 +327,9 @@ public class BluetoothControlActivity extends Activity {
                         }
                         
                     }else if (Objects.equals(targetAction, "断链")){
-                        Log.d("auto_action","断链");
+                        updateConnectedDeviceLists();
                         BluetoothDevice device = connectedDevicesMap.get(targetDeviceAddress);
-                        connectToDevice(device);
+                        disconnectDevice(device);
                         break;
                     }else {
                         Log.e("auto_action","自动化操作未指定");
@@ -361,10 +369,10 @@ public class BluetoothControlActivity extends Activity {
         Set<BluetoothDevice> bondedDevices = bluetoothAdapter.getBondedDevices();
         for (BluetoothDevice device : bondedDevices) {
             String deviceStatus = isDeviceConnected(device) ? "已连接" : "已配对";
-            String deviceInfo = String.format("名称: %s\n地址: %-18s\n%3s",
+            String deviceInfo = String.format("名称: %-32s%3s\n地址: %s\n",
                     device.getName(),
-                    device.getAddress(),
-                    deviceStatus
+                    deviceStatus,
+                    device.getAddress()
             );
             connectedDevicesMap.put(device.getAddress(), device);
             connectedDeviceList.add(deviceInfo);
@@ -407,7 +415,7 @@ public class BluetoothControlActivity extends Activity {
                         boolean isConnected = a2dpHelper.isDeviceConnected(device.getAddress());
                         if (isConnected) {
                             updateStatus("设备已连接: " + device.getName());
-                            Log.d("BluetoothControlActivity", device.getName() + "已连接");
+                            Log.d("result", device.getName() + "已连接");
                             return;
                         }
                         Thread.sleep(1000);
@@ -416,7 +424,7 @@ public class BluetoothControlActivity extends Activity {
                     e.printStackTrace();
                 }
                 updateStatus("设备连接失败: " + devicename);
-                Log.d("BluetoothControlActivity", devicename + "连接失败");
+                Log.d("result", devicename + "连接失败");
             }).start();
         } else {
             updateStatus("BLUETOOTH_CONNECT 权限未授予");
@@ -442,11 +450,12 @@ public class BluetoothControlActivity extends Activity {
                         boolean isConnected = a2dpHelper.isDeviceConnected(device.getAddress());
                         if (isConnected) {
                             updateStatus("设备已连接: " + device.getName());
-                            Log.d("BluetoothControlActivity", device.getName() + "已连接");
+                            Log.d("result", device.getName() + "已连接");
                             return;
                         }
                         if (System.currentTimeMillis() - startTime > 5000 && !repair){
-                            if (Objects.equals(devicename, discoveredDevicesMap.get(device.getAddress()).getName())){
+                            BluetoothDevice near_device = discoveredDevicesMap.get(device.getAddress());
+                            if (Objects.equals(device, near_device)){
                                 unpairDevice(device);
                                 pairDevice(device);
                                 repair = true;
@@ -458,7 +467,7 @@ public class BluetoothControlActivity extends Activity {
                     e.printStackTrace();
                 }
                 updateStatus("设备连接失败: " + devicename);
-                Log.d("BluetoothControlActivity", devicename + "连接失败");
+                Log.d("result", devicename + "连接失败");
             }).start();
         } else {
             updateStatus("BLUETOOTH_CONNECT 权限未授予");
@@ -484,12 +493,12 @@ public class BluetoothControlActivity extends Activity {
                             }
                         } else {
                             updateStatus("设备已断链: " + device.getName());
-                            Log.d("BluetoothControlActivity", device.getName() + "已断链");
+                            Log.d("result", device.getName() + "已断链");
                             return;
                         }
                     }
                     updateStatus("设备断链失败: " + device.getName());
-                    Log.d("BluetoothControlActivity", device.getName() + "断链失败");
+                    Log.d("result", device.getName() + "断链失败");
                 } else {
                     updateStatus("设备未连接");
                 }
@@ -540,10 +549,10 @@ public class BluetoothControlActivity extends Activity {
                     } else {
                         deviceInfo = "名称: " + deviceName + "\n地址: " + deviceAddress;
                         BluetoothDevice connected_device = connectedDevicesMap.get(deviceAddress);
-                        if (!deviceList.contains(deviceInfo) && !Objects.equals(device, connected_device)) {
+//                        if (!deviceList.contains(deviceInfo) && !(device==connected_device)) {
+                        if (!deviceList.contains(deviceInfo) && !(Objects.equals(device, connected_device))) {
                             deviceList.add(deviceInfo);
                             discoveredDevicesMap.put(deviceAddress, device);
-
                             runOnUiThread(() -> deviceListAdapter.notifyDataSetChanged());
                         }
                     }

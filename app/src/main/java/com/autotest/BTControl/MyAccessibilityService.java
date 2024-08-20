@@ -18,24 +18,26 @@ public class MyAccessibilityService extends AccessibilityService {
         // 监听不同类型的事件
         if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-            Log.d("AccessibilityService", "rootNode: " + rootNode);
+//            Log.d("AccessibilityService", "rootNode: " + rootNode);
 
             if (rootNode != null) {
                 // 打印节点树以调试
-                printNodeTree(rootNode, 0);
+//                printNodeTree(rootNode, 0);
 
                 // 查找“配对”按钮
                 List<AccessibilityNodeInfo> nodes = findPairButton(rootNode);
 
                 for (AccessibilityNodeInfo node : nodes) {
-                    if (node.isClickable()) {
+//                    Log.d("node", String.valueOf(node));
+                    if (node.isClickable() && node.getText().toString().contains("配对") && !node.getText().toString().contains("已配对")) {
                         // 点击“配对”按钮
                         node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                        Log.d("AccessibilityService", String.valueOf(node));
+                        Log.d("ACTION_CLICK", node.getText().toString());
                         return;
-                    } else {
-                        Log.d("AccessibilityService", "未找到配对按钮");
-                }
+                    }
+//                    else {
+//                        Log.d("AccessibilityService", "未找到配对按钮");
+//                }
                 }
             }
         }
