@@ -2,18 +2,16 @@ package com.autotest.BTControl;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.ActivityManager;
-import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
-import android.bluetooth.BluetoothProfile;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
 import android.view.View;
 import android.widget.ArrayAdapter;
@@ -23,23 +21,28 @@ import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.provider.Settings;
+import android.widget.Toast;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 
 public class BluetoothControlActivity extends Activity {
 
     // Constants
     private static final int REQUEST_BLUETOOTH_PERMISSIONS = 1;
     private static final long AUTO_CONNECT_PERIOD = 60000;
+    private final Handler handler = new Handler();
+    // 添加 ExecutorService 作为成员变量
+    private ExecutorService executorService;
 
     // UI Elements
     private TextView statusTextView;
@@ -73,17 +76,23 @@ public class BluetoothControlActivity extends Activity {
     private BluetoothA2dpHelper a2dpHelper = new BluetoothA2dpHelper(this);
 
     public static boolean auto_action = true;
+    public static boolean auto_update = true;
     public static boolean auto_scan = true;
+    private static final String TAG = "BTControl";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_bluetooth_connection);
 
+        if (executorService == null) {
+            // 如果 executorService 为 null，可能需要重新初始化
+            executorService = Executors.newFixedThreadPool(3);
+        }
+
         initializeUI();
         initializeBluetooth();
         checkAndRequestPermissions();
-
         setupListViewListeners();
         setupActionButtonListener();
     }
@@ -113,15 +122,15 @@ public class BluetoothControlActivity extends Activity {
 
         targetDeviceAddress = getIntent().getStringExtra("bluetooth_address");
         if (targetDeviceAddress != null) {
-            Log.d("param",targetDeviceAddress);
+            Log.d(TAG, "param: " + targetDeviceAddress);
         }
         targetDeviceName = getIntent().getStringExtra("bluetooth_name");
         if (targetDeviceName != null) {
-            Log.d("param",targetDeviceName);
+            Log.d(TAG,"param: " + targetDeviceName);
         }
         targetAction = getIntent().getStringExtra("auto_action");
         if (targetAction != null){
-            Log.d("param",targetAction);
+            Log.d(TAG,"param: " + targetAction);
         }
     }
 
@@ -208,8 +217,7 @@ public class BluetoothControlActivity extends Activity {
         ImageView imageAccessibilitySettings = findViewById(R.id.image_accessibility_settings);
         imageAccessibilitySettings.setOnClickListener(v -> {
             // 跳转到无障碍设置页面
-            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-            startActivity(intent);
+            startAccessibilityService();
         });
     }
 
@@ -225,25 +233,43 @@ public class BluetoothControlActivity extends Activity {
 
     private void setupActionButtonListener() {
         actionButton.setOnClickListener(v -> {
-            if (bluetoothAdapter.isDiscovering()) {
-                stopDiscovery();
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+                resetDeviceLists();
+                registerReceiver(receiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
             } else {
-                startDiscovery();
+                updateStatus("BLUETOOTH_SCAN 权限未授予");
+            }
+            if (bluetoothAdapter.isDiscovering()) {
+                stopDiscovery_click();
+            } else {
+                startDiscovery_click();
             }
         });
     }
+
+    private Runnable discoveryRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (auto_scan) {
+                bluetoothAdapter.startDiscovery();
+                handler.postDelayed(this, AUTO_CONNECT_PERIOD); // Schedule next scan
+            }
+        }
+    };
 
     private void startBluetoothDiscovery() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
             resetDeviceLists();
             registerReceiver(receiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
 
-            startAutoUpdateThread();
-            startAutoConnectThread();
+            auto_action = true;
+            auto_update = true;
+            startAutoThread();
 
             updateStatus("正在扫描...");
-            bluetoothAdapter.startDiscovery();
+//            bluetoothAdapter.startDiscovery();
             auto_scan = true;
+            discoveryRunnable.run();
 
         } else {
             updateStatus("BLUETOOTH_SCAN 权限未授予");
@@ -257,30 +283,33 @@ public class BluetoothControlActivity extends Activity {
         deviceListAdapter.notifyDataSetChanged();
     }
 
-    private void startAutoUpdateThread() {
-        new Thread(() -> {
-            while (true) {
-//                Log.d("auto_update", "正在更新已保存设备");
+    private void startAutoThread() {
+        // 自动更新 UI 列表
+        executorService.submit(() -> {
+            while (!Thread.currentThread().isInterrupted()&&auto_update) {
+//                Log.d(TAG, "auto_update: " + "正在自动刷新ui1");
                 updateConnectedDeviceLists();
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    Thread.currentThread().interrupt(); // 标记中断状态
                     break;
                 }
             }
-        }).start();
-        new Thread(() -> {
-            while (true) {
-//                Log.d("update_discover", "正在更新扫描配置");
+            Log.d(TAG, "auto_update: " + "自动刷新ui1线程已停止");
+        });
+
+        // 自动更新进度条和按钮
+        executorService.submit(() -> {
+            while (!Thread.currentThread().isInterrupted()&&auto_update) {
+//                Log.d(TAG, "auto_update: " + "正在自动刷新ui2");
                 try {
                     Thread.sleep(500);
                 } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    Thread.currentThread().interrupt(); // 标记中断状态
                     break;
                 }
                 if (bluetoothAdapter.isDiscovering()) {
-                    // 使用 runOnUiThread 确保 UI 更新在主线程中执行
                     runOnUiThread(() -> {
                         progressBar.setVisibility(View.VISIBLE);
                         actionButton.setText("停止");
@@ -296,102 +325,101 @@ public class BluetoothControlActivity extends Activity {
                     });
                 }
             }
-        }).start();
+            Log.d(TAG, "auto_update: " + "自动刷新ui2线程已停止");
+        });
+
+        // 自动化操作线程
+        executorService.submit(() -> {
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt(); // 标记中断状态
+            }
+            long startTime = System.currentTimeMillis();
+            while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD&&auto_action) {
+                if (targetDeviceAddress != null && !targetDeviceAddress.isEmpty()) {
+                    handleAutoAction();
+                }else {
+                    break;
+                }
+                try {
+                    Thread.sleep(10000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt(); // 标记中断状态
+                    break;
+                }
+            }
+            Log.d(TAG, "auto_update: " + "自动化操作线程已停止");
+        });
     }
 
-    private void startAutoConnectThread() {
-        new Thread(() -> {
-            long startTime = System.currentTimeMillis();
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-//            updateConnectedDeviceLists();
-            while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD) {
-
-                Log.d("auto_action","正在执行自动任务");
-                if (targetDeviceAddress != null && !targetDeviceAddress.isEmpty()) {
-                    if (Objects.equals(targetAction, "配对")){
-                        BluetoothDevice device = discoveredDevicesMap.get(targetDeviceAddress);
-                        if (device != null) {
-                            Log.d("targetdevice", device.getName());
-                            BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
-                            if (connected_device != null) {
-                                Log.d("connected_device", connected_device.getName());
-                                unpairDevice(device);
-                                try {
-                                    Thread.sleep(100);
-                                } catch (InterruptedException e) {
-                                    throw new RuntimeException(e);
-                                }
-                            }
-                            pairDevice(device);
-                            break;
-                        }
-                    } else if (Objects.equals(targetAction, "连接")) {
-                        BluetoothDevice device = connectedDevicesMap.get(targetDeviceAddress);
-                        if (device == null){
-                            device = connectedDevicesMap.get(targetDeviceAddress);
-                        }
-                        if (device != null) {
-                            connectToDevice(device);
-                            break;
-                        }
-                        
-                    }else if (Objects.equals(targetAction, "断链")){
-                        BluetoothDevice device = connectedDevicesMap.get(targetDeviceAddress);
-                        if (device == null){
-                            device = connectedDevicesMap.get(targetDeviceAddress);
-                        }
-                        disconnectDevice(device);
-                        break;
-                    }else {
-                        Log.e("auto_action","自动化操作未指定");
-                        break;
+    private void handleAutoAction() {
+        Log.d(TAG, "auto_action: " + "正在执行自动任务");
+        if (Objects.equals(targetAction, "配对")) {
+            BluetoothDevice device = discoveredDevicesMap.get(targetDeviceAddress);
+            if (device != null) {
+                BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
+                if (connected_device != null) {
+                    unpairDevice(device);
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                     }
                 }
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                pairDevice(device);
+                auto_action = false;
             }
-            auto_action = false;
+        } else if (Objects.equals(targetAction, "连接")) {
+            BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
+            if (connected_device != null) {
+                connectToDevice(connected_device);
+                auto_action = false;
             }
-        }).start();
+        } else if (Objects.equals(targetAction, "断链")) {
+            BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
+            if (connected_device != null) {
+                disconnectDevice(connected_device);
+                auto_action = false;
+            }
+        } else {
+            Log.e(TAG, "auto_action: " + "自动化操作未指定");
+        }
     }
 
-    private void click_Discovery() {
+
+    private void Bluetooth_Discovery() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
             resetDeviceLists();
             registerReceiver(receiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
 
             updateStatus("正在扫描...");
             bluetoothAdapter.startDiscovery();
-
         } else {
             updateStatus("BLUETOOTH_SCAN 权限未授予");
         }
     }
 
-    private void stopDiscovery() {
+    private void stopDiscovery_click() {
         progressBar.setVisibility(View.GONE);
         actionButton.setText("扫描");
         bluetoothAdapter.cancelDiscovery();
         updateStatus("扫描已停止");
+        auto_scan = false;
+        handler.removeCallbacks(discoveryRunnable);
     }
 
-    private void startDiscovery() {
+    private void startDiscovery_click() {
         progressBar.setVisibility(View.VISIBLE);
         actionButton.setText("停止");
-        click_Discovery();
+        Bluetooth_Discovery();
         updateStatus("正在扫描");
     }
 
     private void updateConnectedDeviceLists() {
         connectedDevicesMap.clear();
         connectedDeviceList.clear();
-//        Log.d("updateConnected", "正在更新已保存设备");
+//        Log.d(TAG, "updateConnected: " +"正在更新已保存设备");
 
         Set<BluetoothDevice> bondedDevices = bluetoothAdapter.getBondedDevices();
         for (BluetoothDevice device : bondedDevices) {
@@ -417,6 +445,7 @@ public class BluetoothControlActivity extends Activity {
             return false;
         }
     }
+
     private void pairDevice(BluetoothDevice device) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
             new Thread(() -> {
@@ -433,25 +462,24 @@ public class BluetoothControlActivity extends Activity {
                             }
                         });
                     }
-                    // 等待设备连接状态更新
                     Thread.sleep(1000);
 
                     long startTime = System.currentTimeMillis();
-                    long duration = 20000; // 20秒的持续时间
+                    long duration = 20000;
                     while (System.currentTimeMillis() - startTime < duration) {
                         boolean isConnected = a2dpHelper.isDeviceConnected(device.getAddress());
                         if (isConnected) {
                             updateStatus("设备已连接: " + device.getName());
-                            Log.d("result", device.getName() + "已连接");
+                            Log.d(TAG, "result: " + device.getName() + "已连接");
                             return;
                         }
                         Thread.sleep(1000);
                     }
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    Thread.currentThread().interrupt();
                 }
                 updateStatus("设备连接失败: " + devicename);
-                Log.d("result", devicename + "连接失败");
+                Log.d(TAG, "result: " + devicename + "连接失败");
             }).start();
         } else {
             updateStatus("BLUETOOTH_CONNECT 权限未授予");
@@ -469,33 +497,32 @@ public class BluetoothControlActivity extends Activity {
                         a2dpHelper.connectA2dp(device.getAddress());
                         updateStatus("设备正在连接: " + device.getName());
                     }
-                    // 等待设备连接状态更新
                     Thread.sleep(1000);
 
                     long startTime = System.currentTimeMillis();
-                    long duration = 15000; // 20秒的持续时间
+                    long duration = 15000;
                     while (System.currentTimeMillis() - startTime < duration) {
                         boolean isConnected = a2dpHelper.isDeviceConnected(device.getAddress());
                         if (isConnected) {
                             updateStatus("设备已连接: " + device.getName());
-                            Log.d("result", device.getName() + "已连接");
+                            Log.d(TAG, "result: " + device.getName() + "已连接");
                             return;
                         }
-                        if (System.currentTimeMillis() - startTime > 5000 && !repair){
+                        if (System.currentTimeMillis() - startTime > 5000 && !repair) {
                             BluetoothDevice near_device = discoveredDevicesMap.get(device.getAddress());
-                            if (Objects.equals(device, near_device)){
+                            if (Objects.equals(device, near_device)) {
                                 unpairDevice(device);
                                 pairDevice(device);
                                 repair = true;
-                            };
+                            }
                         }
                         Thread.sleep(1000);
                     }
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    Thread.currentThread().interrupt();
                 }
                 updateStatus("设备连接失败: " + devicename);
-                Log.d("result", devicename + "连接失败");
+                Log.d(TAG, "result: " + devicename + "连接失败");
             }).start();
         } else {
             updateStatus("BLUETOOTH_CONNECT 权限未授予");
@@ -508,25 +535,25 @@ public class BluetoothControlActivity extends Activity {
                 if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
                     a2dpHelper.disconnectA2dp(device.getAddress());
                     updateStatus("设备正在断链: " + device.getName());
-                    // 尝试获取设备的连接状态
 
                     long startTime = System.currentTimeMillis();
-                    long duration = 20000; // 20秒的持续时间
-                    while (System.currentTimeMillis() - startTime < duration){
+                    long duration = 20000;
+                    while (System.currentTimeMillis() - startTime < duration) {
                         if (isDeviceConnected(device)) {
                             try {
                                 Thread.sleep(1000);
                             } catch (InterruptedException e) {
-                                throw new RuntimeException(e);
+                                Thread.currentThread().interrupt();
+                                break;
                             }
                         } else {
                             updateStatus("设备已断链: " + device.getName());
-                            Log.d("result", device.getName() + "已断链");
+                            Log.d(TAG, "result: " + device.getName() + "已断链");
                             return;
                         }
                     }
                     updateStatus("设备断链失败: " + device.getName());
-                    Log.d("result", device.getName() + "断链失败");
+                    Log.d(TAG, "result: " + device.getName() + "断链失败");
                 } else {
                     updateStatus("设备未连接");
                 }
@@ -540,8 +567,17 @@ public class BluetoothControlActivity extends Activity {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
             new Thread(() -> {
                 try {
-                    Method method = device.getClass().getMethod("removeBond");
-                    method.invoke(device);
+                    Method removeBondMethod = device.getClass().getMethod("removeBond");
+                    boolean result = (Boolean) removeBondMethod.invoke(device);
+                    runOnUiThread(() -> {
+                        if (result) {
+                            updateStatus("设备已解除配对: " + device.getName());
+                            Log.d(TAG, "result: " + device.getName() + "取消配对成功");
+                        } else {
+                            updateStatus("解除配对失败: " + device.getName());
+                            Log.d(TAG, "result: " + device.getName() + "取消配对失败");
+                        }
+                    });
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -591,39 +627,50 @@ public class BluetoothControlActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        Log.d(TAG,"正在关闭APP");
         super.onDestroy();
-        stopAccessibilityService();
         unregisterReceiver(receiver);
         if (bluetoothAdapter != null && bluetoothAdapter.isDiscovering()) {
-            stopDiscovery();
+            bluetoothAdapter.cancelDiscovery();
+        }
+        // 关闭 ExecutorService
+        if (executorService != null && !executorService.isShutdown()) {
+            auto_action = false;
+            auto_update = false;
+            executorService.shutdown(); // 不接受新任务，但已提交的任务会继续执行
+            try {
+                if (!executorService.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                    executorService.shutdownNow(); // 立即停止所有正在执行的任务
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow(); // 如果等待终止时被中断，则立即停止所有任务
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
     @Override
     protected void onStart() {
         super.onStart();
-        startAccessibilityService();
-    }
-    private void stopAccessibilityService() {
-        Intent intent = new Intent(this, MyAccessibilityService.class);
-        stopService(intent);
+//        startAccessibilityService();
     }
 
     private void startAccessibilityService() {
-        if (!isAccessibilityServiceRunning(MyAccessibilityService.class)) {
-            Intent intent = new Intent(this, MyAccessibilityService.class);
-            startService(intent);
+        if (!isAccessibilityServiceEnabled(this, MyAccessibilityService.class)) {
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            startActivity(intent);
+            Toast.makeText(this, "请手动开启无障碍服务", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "无障碍服务已启用", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private boolean isAccessibilityServiceRunning(Class<?> serviceClass) {
-        ActivityManager activityManager = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-        for (ActivityManager.RunningServiceInfo service : activityManager.getRunningServices(Integer.MAX_VALUE)) {
-            if (serviceClass.getName().equals(service.service.getClassName())) {
-                return true;
-            }
-        }
-        return false;
+    private boolean isAccessibilityServiceEnabled(Context context, Class<?> serviceClass) {
+        String service = context.getPackageName() + "/" + serviceClass.getCanonicalName();
+        String enabledServices = Settings.Secure.getString(
+                context.getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        return enabledServices != null && enabledServices.contains(service);
     }
 
 }
