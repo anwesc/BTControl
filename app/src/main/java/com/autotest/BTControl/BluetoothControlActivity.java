@@ -358,6 +358,7 @@ public class BluetoothControlActivity extends Activity {
         if (Objects.equals(targetAction, "配对")) {
             BluetoothDevice device = discoveredDevicesMap.get(targetDeviceAddress);
             if (device != null) {
+                Log.d(TAG, "已发现设备: " + device.getName());
                 BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
                 if (connected_device != null) {
                     unpairDevice(device);
