@@ -363,7 +363,7 @@ public class BluetoothControlActivity extends Activity {
                 if (connected_device != null) {
                     unpairDevice(device);
                     try {
-                        Thread.sleep(100);
+                        Thread.sleep(1000);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
