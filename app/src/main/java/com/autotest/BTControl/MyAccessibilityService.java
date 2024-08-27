@@ -28,6 +28,18 @@ public class MyAccessibilityService extends AccessibilityService {
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
 
         if (rootNode != null) {
+            printNodeTree(rootNode,0);
+
+            List<AccessibilityNodeInfo> usb_nodes = findUSB(rootNode);
+            for (AccessibilityNodeInfo node : usb_nodes) {
+                CharSequence text = node.getText();
+                if (text != null && text.toString().contains("USB")) {
+                    performGlobalAction(GLOBAL_ACTION_BACK);
+                    Log.d(TAG, "GLOBAL_ACTION_BACK: " + text);
+                    return;
+                }
+            }
+
             // 查找“配对”按钮
             List<AccessibilityNodeInfo> nodes = findPairButton(rootNode);
 
@@ -36,9 +48,10 @@ public class MyAccessibilityService extends AccessibilityService {
                 if (node.isClickable() && text != null && text.toString().contains("配对") && !text.toString().contains("已配对")) {
                     // 点击“配对”按钮
                     node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    Log.d(TAG, "ACTION_CLICK: " + text.toString());
+                    Log.d(TAG, "ACTION_CLICK: " + text);
                     return;
                 }
+
             }
         }
     }
@@ -58,6 +71,10 @@ public class MyAccessibilityService extends AccessibilityService {
 
     private List<AccessibilityNodeInfo> findPairButton(AccessibilityNodeInfo rootNode) {
         return rootNode.findAccessibilityNodeInfosByText("配对");
+    }
+
+    private List<AccessibilityNodeInfo> findUSB(AccessibilityNodeInfo rootNode) {
+        return rootNode.findAccessibilityNodeInfosByText("USB");
     }
 
     @Override
