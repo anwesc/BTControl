@@ -28,7 +28,7 @@ public class MyAccessibilityService extends AccessibilityService {
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
 
         if (rootNode != null) {
-            printNodeTree(rootNode,0);
+//            printNodeTree(rootNode,0);
 
             List<AccessibilityNodeInfo> usb_nodes = findUSB(rootNode);
             for (AccessibilityNodeInfo node : usb_nodes) {
