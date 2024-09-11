@@ -4,22 +4,47 @@ plugins {
 
 android {
     namespace 'com.autotest.BTControl'
-    compileSdk 34
+    compileSdk 35
+
+    signingConfigs {
+        config {
+            storeFile file("E:\\Work\\AS\\key\\BTControl_sys.jks")
+            storePassword "123456"
+            keyPassword "123456"
+            keyAlias "key0"
+        }
+    }
 
     defaultConfig {
         applicationId "com.autotest.BTControl"
-        minSdk 29
-        targetSdk 34
+        minSdk 27
+        targetSdk 35
         versionCode 1
-        versionName "1.0"
+        versionName "1.3.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        signingConfig signingConfigs.config
+    }
+
+    // 自定义打包名称
+    applicationVariants.configureEach { variant ->
+        variant.outputs.configureEach { output ->
+            def versionName = variant.versionName
+            def apkName = "BTControl_v${versionName}.apk"
+            outputFileName = apkName
+        }
     }
 
     buildTypes {
         release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.config
+        }
+        debug {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.config
         }
     }
     compileOptions {
