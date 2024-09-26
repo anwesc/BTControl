@@ -968,16 +968,16 @@ public class BluetoothControlActivity extends Activity {
                         }
 
                         if (elapsedTime >= duration) {
-                            updateStatus("设备连接失败: " + device.getName());
-                            Log.i(TAG, "result: " + devicename + "未连接");
+                            updateStatus("设备配对失败: " + device.getName());
+                            Log.i(TAG, "result: " + devicename + "配对失败");
                             break;
                         }
                     }
 
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    updateStatus("设备连接失败: " + device.getName());
-                    Log.i(TAG, "result: " + devicename + "连接失败");
+                    updateStatus("设备配对失败: " + device.getName());
+                    Log.i(TAG, "result: " + devicename + "配对失败");
                 }
             }).start();
         } else {
@@ -1169,8 +1169,8 @@ public class BluetoothControlActivity extends Activity {
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    updateStatus("设备连接失败: " + device.getName());
-                    Log.i(TAG, "result: " + device.getName() + "连接失败");
+                    updateStatus("设备断链失败: " + device.getName());
+                    Log.i(TAG, "result: " + device.getName() + "断链失败");
                 }
             }).start();
         } else {
@@ -1213,10 +1213,10 @@ public class BluetoothControlActivity extends Activity {
                     boolean result = (Boolean) removeBondMethod.invoke(device);
                     if (result) {
                         updateStatus("设备已解除配对: " + device.getName());
-                        Log.i(TAG, "result: " + device.getName() + "取消配对成功");
+                        Log.i(TAG, "result: " + device.getName() + "解除配对成功");
                     } else {
                         updateStatus("解除配对失败: " + device.getName());
-                        Log.i(TAG, "result: " + device.getName() + "取消配对失败");
+                        Log.i(TAG, "result: " + device.getName() + "解除配对失败");
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "error: " + e);
