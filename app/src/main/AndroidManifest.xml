@@ -22,6 +22,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_PRIVILEGED"
         tools:ignore="ProtectedPermissions" />
 
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Declare usage of BLE (Bluetooth Low Energy) -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
 

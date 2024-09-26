@@ -19,8 +19,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.ParcelUuid;
+import android.os.PowerManager;
+import android.app.KeyguardManager;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -90,7 +93,7 @@ public class BluetoothControlActivity extends Activity {
 
     private final ArrayList<String> connectedDeviceList = new ArrayList<>();
     private final HashMap<String, BluetoothDevice> connectedDevicesMap = new HashMap<>();
-
+    private PowerManager.WakeLock wakeLock;
 
     // Bluetooth Helper
     private final BluetoothDevHelper DevHelper = new BluetoothDevHelper(this);
@@ -111,6 +114,19 @@ public class BluetoothControlActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_bluetooth_connection);
+
+        // 初始化 WakeLock
+        PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        wakeLock = powerManager.newWakeLock(PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "MyApp::MyWakelockTag");
+        wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/);
+
+        // 保持屏幕常亮
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+
+        // 解锁屏幕
+        KeyguardManager keyguardManager = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        KeyguardManager.KeyguardLock keyguardLock = keyguardManager.newKeyguardLock("BTControl::MyKeyguardLock");
+        keyguardLock.disableKeyguard();
 
         if (executorService == null) {
             // 如果 executorService 为 null，可能需要重新初始化
@@ -452,6 +468,7 @@ public class BluetoothControlActivity extends Activity {
 
     private void startBluetoothDiscovery() {
         if (hasPermissions()) {
+
             resetDeviceLists();
             registerReceiver(receiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
             first_get_CtdDev_finish = false;
@@ -1294,6 +1311,14 @@ public class BluetoothControlActivity extends Activity {
     protected void onStart() {
         super.onStart();
 //        startAccessibilityService();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (wakeLock.isHeld()) {
+            wakeLock.release();
+        }
     }
 
     private void startAccessibilityService() {
