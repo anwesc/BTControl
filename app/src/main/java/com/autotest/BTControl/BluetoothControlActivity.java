@@ -555,7 +555,7 @@ public class BluetoothControlActivity extends Activity {
                 scheduler_ui.shutdown();
             }
 
-        },0, 500, TimeUnit.MILLISECONDS); // 初始延迟为0，之后每秒执行一次
+        },0, 1, TimeUnit.SECONDS); // 初始延迟为0，之后每秒执行一次
 
 
         // 自动化操作线程
@@ -1071,9 +1071,9 @@ public class BluetoothControlActivity extends Activity {
                     Thread.sleep(1000);
 
                     long startTime = System.currentTimeMillis();
-                    long duration = 15000; // 15秒超时
+                    long duration = 20000; // 20秒超时
                     while (System.currentTimeMillis() - startTime <= duration) {
-                        if (System.currentTimeMillis() - startTime > 5000 && !repair[0]) {
+                        if (System.currentTimeMillis() - startTime > 10000 && !repair[0]) {
                             BluetoothDevice near_device = discoveredDevicesMap.get(device.getAddress());
                             if (Objects.equals(device, near_device)) {
                                 unpairDevice(device);
