@@ -301,6 +301,13 @@ public class BluetoothControlActivity extends Activity {
                             }
                             disconnectDevice(device);
                         } else {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkBox.isChecked()) {
+                                Log.d("BluetoothProfile", "这是一个LE Audio设备");
+                                Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+                                startActivity(intent);
+                                Toast.makeText(this, "LE Audio设备请在蓝牙设置页面控制", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
                             connectToDevice(device);
                         }
                     } else {
