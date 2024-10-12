@@ -33,10 +33,26 @@ public class MyAccessibilityService extends AccessibilityService {
             List<AccessibilityNodeInfo> usb_nodes = findUSB(rootNode);
             for (AccessibilityNodeInfo node : usb_nodes) {
                 CharSequence text = node.getText();
-                if (text != null && text.toString().contains("USB")) {
+                if (text != null && text.toString().contains("USB 用于")) {
                     performGlobalAction(GLOBAL_ACTION_BACK);
                     Log.d(TAG, "GLOBAL_ACTION_BACK: " + text);
                     return;
+                }
+            }
+
+            List<AccessibilityNodeInfo> warningNodes = rootNode.findAccessibilityNodeInfosByText("长时间保持高音量可能会损伤听力");
+
+            if (warningNodes != null && !warningNodes.isEmpty()) {
+                // 找到警告文本后，查找“确定”按钮
+                List<AccessibilityNodeInfo> confirmNodes = rootNode.findAccessibilityNodeInfosByText("确定");
+
+                if (confirmNodes != null && !confirmNodes.isEmpty()) {
+                    for (AccessibilityNodeInfo confirmNode : confirmNodes) {
+                        // 尝试点击确认按钮
+                        if (confirmNode.isClickable()) {
+                            confirmNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                        }
+                    }
                 }
             }
 
@@ -74,7 +90,7 @@ public class MyAccessibilityService extends AccessibilityService {
     }
 
     private List<AccessibilityNodeInfo> findUSB(AccessibilityNodeInfo rootNode) {
-        return rootNode.findAccessibilityNodeInfosByText("USB");
+        return rootNode.findAccessibilityNodeInfosByText("USB 用于");
     }
 
     @Override
