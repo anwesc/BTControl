@@ -582,7 +582,7 @@ public class BluetoothControlActivity extends Activity {
                     break;
                 }
                 try {
-                    Thread.sleep(5000);
+                    Thread.sleep(4800);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt(); // 标记中断状态
                     break;
@@ -623,10 +623,51 @@ public class BluetoothControlActivity extends Activity {
         }
 
         Log.d(TAG, "auto_action: " + "正在执行自动任务");
-        if (Objects.equals(targetAction, "配对")) {
-            BluetoothDevice device = discoveredDevicesMap.get(targetDeviceAddress);
-            if (device != null) {
-                Log.d(TAG, "已发现设备: " + device.getName());
+        int retryCount = 0;
+        final int maxRetries = 2;
+        if (Objects.equals(targetAction, "扫描")) {
+            BluetoothDevice near_device;
+            while (retryCount <= maxRetries) {
+                near_device = discoveredDevicesMap.get(targetDeviceAddress);
+                if (near_device != null) {
+                    Log.d(TAG, "已发现设备: " + near_device.getName());
+                    break; // 如果发现设备，则退出循环
+                } else {
+                    Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
+                    retryCount++;
+                    if (retryCount <= maxRetries) {
+                        try {
+                            Thread.sleep(3600); // 等待3.6秒
+                        } catch (InterruptedException e) {
+                            Log.e(TAG, "线程被中断", e);
+                            Thread.currentThread().interrupt(); // 恢复中断状态
+                        }
+                    }
+                }
+            }
+        } else if (Objects.equals(targetAction, "配对")) {
+            BluetoothDevice near_device = null;
+            while (retryCount <= maxRetries) {
+                near_device = discoveredDevicesMap.get(targetDeviceAddress);
+                if (near_device != null) {
+                    Log.d(TAG, "已发现设备: " + near_device.getName());
+                    auto_action = false;
+                    break; // 如果发现设备，则退出循环
+                } else {
+                    Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
+                    retryCount++;
+                    if (retryCount <= maxRetries) {
+                        try {
+                            Thread.sleep(3600); // 等待3.6秒
+                        } catch (InterruptedException e) {
+                            Log.e(TAG, "线程被中断", e);
+                            Thread.currentThread().interrupt(); // 恢复中断状态
+                        }
+                    }
+                }
+            }
+            if (near_device != null) {
+                Log.d(TAG, "已发现设备: " + near_device.getName());
                 BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
                 if (connected_device != null) {
                     unpairDevice(connected_device);
@@ -636,29 +677,26 @@ public class BluetoothControlActivity extends Activity {
                         Thread.currentThread().interrupt();
                     }
                 }
-                pairDevice(device);
-                auto_action = false;
+                pairDevice(near_device);
             }
         } else if (Objects.equals(targetAction, "连接")) {
             BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
             if (connected_device != null) {
                 connectToDevice(connected_device);
-                auto_action = false;
             }
         } else if (Objects.equals(targetAction, "断链")) {
             BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
             if (connected_device != null) {
                 disconnectDevice(connected_device);
-                auto_action = false;
             }
         }else if (Objects.equals(targetAction, "取消配对")) {
             BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
             if (connected_device != null) {
                 unpairDevice(connected_device);
-                auto_action = false;
             }
         } else {
             Log.e(TAG, "auto_action: " + "自动化操作未指定");
+            auto_action = false;
         }
     }
 
@@ -966,6 +1004,7 @@ public class BluetoothControlActivity extends Activity {
                         if (isDeviceConnected(device).isConnected()) {
                             updateStatus("设备已连接: " + device.getName());
                             Log.i(TAG, "result: " + devicename + "已连接");
+                            auto_action = false;
                             try {
                                 for (Method method : device.getClass().getDeclaredMethods()) {
                                     Log.d("BluetoothMethods", method.getName());
@@ -1092,6 +1131,7 @@ public class BluetoothControlActivity extends Activity {
                         if (isDeviceConnected(device).isConnected()) {
                             updateStatus("设备已连接: " + devicename);
                             Log.i(TAG, "result: " + devicename + "已连接");
+                            auto_action = false;
                             return;
                         }
                     }
@@ -1183,6 +1223,7 @@ public class BluetoothControlActivity extends Activity {
                             if (!isDeviceConnected(device).isConnected()) {
                                 updateStatus("设备已断链: " + device.getName());
                                 Log.i(TAG, "result: " + device.getName() + "已断链");
+                                auto_action = false;
                                 return;
                             }
                         }
@@ -1238,6 +1279,7 @@ public class BluetoothControlActivity extends Activity {
                     if (result) {
                         updateStatus("设备已解除配对: " + device.getName());
                         Log.i(TAG, "result: " + device.getName() + "解除配对成功");
+                        auto_action = false;
                     } else {
                         updateStatus("解除配对失败: " + device.getName());
                         Log.i(TAG, "result: " + device.getName() + "解除配对失败");
