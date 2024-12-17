@@ -631,6 +631,7 @@ public class BluetoothControlActivity extends Activity {
                 near_device = discoveredDevicesMap.get(targetDeviceAddress);
                 if (near_device != null) {
                     Log.d(TAG, "已发现设备: " + near_device.getName());
+                    auto_action = false;
                     break; // 如果发现设备，则退出循环
                 } else {
                     Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
@@ -651,7 +652,16 @@ public class BluetoothControlActivity extends Activity {
                 near_device = discoveredDevicesMap.get(targetDeviceAddress);
                 if (near_device != null) {
                     Log.d(TAG, "已发现设备: " + near_device.getName());
-                    auto_action = false;
+                    BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
+                    if (connected_device != null) {
+                        unpairDevice(connected_device);
+                        try {
+                            Thread.sleep(1000);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    pairDevice(near_device);
                     break; // 如果发现设备，则退出循环
                 } else {
                     Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
@@ -665,19 +675,6 @@ public class BluetoothControlActivity extends Activity {
                         }
                     }
                 }
-            }
-            if (near_device != null) {
-                Log.d(TAG, "已发现设备: " + near_device.getName());
-                BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
-                if (connected_device != null) {
-                    unpairDevice(connected_device);
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
-                pairDevice(near_device);
             }
         } else if (Objects.equals(targetAction, "连接")) {
             BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
