@@ -30,10 +30,16 @@ public class MyAccessibilityService extends AccessibilityService {
         if (rootNode != null) {
 //            printNodeTree(rootNode,0);
 
-            List<AccessibilityNodeInfo> usb_nodes = findUSB(rootNode);
+            List<AccessibilityNodeInfo> usb_nodes = rootNode.findAccessibilityNodeInfosByText("USB 用于");
             for (AccessibilityNodeInfo node : usb_nodes) {
                 CharSequence text = node.getText();
+
                 if (text != null && text.toString().contains("USB 用于")) {
+                    try {
+                        Thread.sleep(3000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt(); // 标记中断状态
+                    }
                     performGlobalAction(GLOBAL_ACTION_BACK);
                     Log.d(TAG, "GLOBAL_ACTION_BACK: " + text);
                     return;
@@ -45,9 +51,10 @@ public class MyAccessibilityService extends AccessibilityService {
             if (warningNodes != null && !warningNodes.isEmpty()) {
                 // 找到警告文本后，查找“确定”按钮
                 List<AccessibilityNodeInfo> confirmNodes = rootNode.findAccessibilityNodeInfosByText("确定");
-
                 if (confirmNodes != null && !confirmNodes.isEmpty()) {
                     for (AccessibilityNodeInfo confirmNode : confirmNodes) {
+                        CharSequence text = confirmNode.getText();
+                        Log.d(TAG, "损伤听力:" + text);
                         // 尝试点击确认按钮
                         if (confirmNode.isClickable()) {
                             confirmNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
@@ -55,13 +62,13 @@ public class MyAccessibilityService extends AccessibilityService {
                     }
                 }
             }
-
             // 查找“配对”按钮
-            List<AccessibilityNodeInfo> nodes = findPairButton(rootNode);
+            List<AccessibilityNodeInfo> pairsNodes = rootNode.findAccessibilityNodeInfosByText("配对");
 
-            for (AccessibilityNodeInfo node : nodes) {
+            for (AccessibilityNodeInfo node : pairsNodes) {
                 CharSequence text = node.getText();
-                if (node.isClickable() && text != null && text.toString().contains("配对") && !text.toString().contains("已配对")) {
+                if (node.isClickable() && text != null && text.toString().contains("配对") && !text.toString().contains("已")
+                        && !text.toString().contains("取消") && !text.toString().contains("与")) {
                     // 点击“配对”按钮
                     node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
                     Log.d(TAG, "ACTION_CLICK: " + text);
@@ -83,14 +90,6 @@ public class MyAccessibilityService extends AccessibilityService {
         for (int i = 0; i < node.getChildCount(); i++) {
             printNodeTree(node.getChild(i), depth + 1);
         }
-    }
-
-    private List<AccessibilityNodeInfo> findPairButton(AccessibilityNodeInfo rootNode) {
-        return rootNode.findAccessibilityNodeInfosByText("配对");
-    }
-
-    private List<AccessibilityNodeInfo> findUSB(AccessibilityNodeInfo rootNode) {
-        return rootNode.findAccessibilityNodeInfosByText("USB 用于");
     }
 
     @Override
