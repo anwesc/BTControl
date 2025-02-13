@@ -33,7 +33,6 @@ public class MyAccessibilityService extends AccessibilityService {
             List<AccessibilityNodeInfo> usb_nodes = rootNode.findAccessibilityNodeInfosByText("USB 用于");
             for (AccessibilityNodeInfo node : usb_nodes) {
                 CharSequence text = node.getText();
-
                 if (text != null && text.toString().contains("USB 用于")) {
                     try {
                         Thread.sleep(3000);
@@ -42,12 +41,26 @@ public class MyAccessibilityService extends AccessibilityService {
                     }
                     performGlobalAction(GLOBAL_ACTION_BACK);
                     Log.d(TAG, "GLOBAL_ACTION_BACK: " + text);
-                    return;
                 }
             }
 
-            List<AccessibilityNodeInfo> warningNodes = rootNode.findAccessibilityNodeInfosByText("长时间保持高音量可能会损伤听力");
+            List<AccessibilityNodeInfo> usb_connects_nodes = rootNode.findAccessibilityNodeInfosByText("USB 连接方式");
+            if (usb_connects_nodes != null  && !usb_connects_nodes.isEmpty()){
+                List<AccessibilityNodeInfo> cancelNodes = rootNode.findAccessibilityNodeInfosByText("取消");
+                if (cancelNodes != null && !cancelNodes.isEmpty()) {
+                    for (AccessibilityNodeInfo cancelNode : cancelNodes) {
+                        CharSequence text = cancelNode.getText();
+                        Log.d(TAG, "cancelNode:" + text);
+                        // 尝试点击确认按钮
+                        if (cancelNode.isClickable()) {
+                            cancelNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                        }
+                    }
+                }
+            }
 
+
+            List<AccessibilityNodeInfo> warningNodes = rootNode.findAccessibilityNodeInfosByText("长时间保持高音量可能会损伤听力");
             if (warningNodes != null && !warningNodes.isEmpty()) {
                 // 找到警告文本后，查找“确定”按钮
                 List<AccessibilityNodeInfo> confirmNodes = rootNode.findAccessibilityNodeInfosByText("确定");
@@ -62,19 +75,27 @@ public class MyAccessibilityService extends AccessibilityService {
                     }
                 }
             }
+
             // 查找“配对”按钮
             List<AccessibilityNodeInfo> pairsNodes = rootNode.findAccessibilityNodeInfosByText("配对");
+            if (pairsNodes != null && !pairsNodes.isEmpty()) {
+                for (AccessibilityNodeInfo pairsNode : pairsNodes) {
+                    CharSequence text = pairsNode.getText();
+                    Log.d(TAG, "配对文本:" + text);
+                    if (text.toString().contains("配对") && !text.toString().contains("已") && !text.toString().contains("取消") && !text.toString().contains("与") && !text.toString().contains("通讯录")) {
+                        // 点击“配对”按钮
+                        try {
+                            Thread.sleep(1000);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt(); // 标记中断状态
+                        }
+                        if (pairsNode.isClickable()) {
+                            pairsNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                            Log.d(TAG, "ACTION_CLICK: " + text);
+                        }
+                    }
 
-            for (AccessibilityNodeInfo node : pairsNodes) {
-                CharSequence text = node.getText();
-                if (node.isClickable() && text != null && text.toString().contains("配对") && !text.toString().contains("已")
-                        && !text.toString().contains("取消") && !text.toString().contains("与")) {
-                    // 点击“配对”按钮
-                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    Log.d(TAG, "ACTION_CLICK: " + text);
-                    return;
                 }
-
             }
         }
     }

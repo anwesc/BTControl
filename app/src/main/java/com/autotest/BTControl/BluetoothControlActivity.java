@@ -986,7 +986,7 @@ public class BluetoothControlActivity extends Activity {
                         boolean pairingResult = device.createBond();
                         runOnUiThread(() -> {
                             if (pairingResult) {
-                                updateStatus("配对请求已发起，请在系统设置中确认配对");
+                                updateStatus("建链请求已发起，请在系统设置中确认");
                             } else {
                                 updateStatus("配对失败: " + device.getName());
                             }
