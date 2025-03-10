@@ -9,7 +9,7 @@ import java.util.List;
 
 public class MyAccessibilityService extends AccessibilityService {
 
-    private static final String TAG = "MyAccessibilityService";
+    private static final String TAG = "BTControl:(MyAccessibilityService)";
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
