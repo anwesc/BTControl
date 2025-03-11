@@ -1,6 +1,7 @@
 package com.autotest.BTControl;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
@@ -115,7 +116,7 @@ public class BluetoothControlActivity extends Activity {
 
         // 初始化 WakeLock
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        wakeLock = powerManager.newWakeLock(PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "MyApp::MyWakelockTag");
+        wakeLock = powerManager.newWakeLock(PowerManager.FULL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE, "BTControl:MyWakelockTag");
         wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/);
 
         // 保持屏幕常亮
@@ -252,6 +253,7 @@ public class BluetoothControlActivity extends Activity {
         }
     }
 
+    @SuppressLint("MissingPermission")
     private void setupListViewListeners() {
         deviceListView.setOnItemClickListener((parent, view, position, id) -> {
             if (isEventProcessing) {
@@ -365,6 +367,7 @@ public class BluetoothControlActivity extends Activity {
     }
 
 
+    @SuppressLint("MissingPermission")
     private void setupActionButtonListener() {
         actionButton.setOnClickListener(v -> {
             if (hasPermissions()) {
@@ -382,6 +385,7 @@ public class BluetoothControlActivity extends Activity {
     }
 
     private final Runnable discoveryRunnable = new Runnable() {
+        @SuppressLint("MissingPermission")
         @Override
         public void run() {
             if (auto_scan) {
@@ -1181,12 +1185,12 @@ public class BluetoothControlActivity extends Activity {
                     if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
                         String deviceAddress = device.getAddress();
                         updateStatus("设备正在断链: " + device.getName());
-                        Log.d("disconnect", "正在断链");
+                        Log.d(TAG, "disconnect: 正在断链");
                         try {
                             Method disconnectDevice = device.getClass().getMethod("disconnect");
                             boolean result = (Boolean) disconnectDevice.invoke(device);
                             if (result) {
-                                Log.d("disconnect", String.valueOf(true));
+                                Log.d(TAG, "disconnect: 断链成功");
                             }
 
                         } catch (NoSuchMethodException e) {
@@ -1226,7 +1230,6 @@ public class BluetoothControlActivity extends Activity {
                         if (System.currentTimeMillis() - startTime > duration){
                             updateStatus("设备断链失败: " + device.getName());
                             Log.d(TAG, "result: " + device.getName() + "断链失败");
-                            auto_action = false;
                         }
                     }
                 } catch (InterruptedException e) {
@@ -1305,7 +1308,7 @@ public class BluetoothControlActivity extends Activity {
             if (BluetoothDevice.ACTION_FOUND.equals(action)) {
                 BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                 if (device != null) {
-                    String deviceName = device.getName();
+                    @SuppressLint("MissingPermission") String deviceName = device.getName();
                     String deviceAddress = device.getAddress();
 
                     String deviceInfo;
@@ -1333,6 +1336,7 @@ public class BluetoothControlActivity extends Activity {
     };
 
 
+    @SuppressLint("MissingPermission")
     @Override
     protected void onDestroy() {
         Log.d(TAG,"正在关闭APP");
