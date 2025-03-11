@@ -569,7 +569,7 @@ public class BluetoothControlActivity extends Activity {
                 long startTime = System.currentTimeMillis();
                 while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD) {
                     if (!first_get_CtdDev_finish) {
-//                        Thread.sleep(1000);
+                        Thread.sleep(100);
                         continue;
                     }
                     if (auto_action) {
@@ -577,8 +577,8 @@ public class BluetoothControlActivity extends Activity {
                             handleAutoAction();
                         } else {
                             Log.d(TAG, "auto_action: " + "未传入正确的参数，自动化线程已停止");
-                            break;
                         }
+                        break;
                     }
                 }
             } catch (Exception e) {
@@ -636,7 +636,7 @@ public class BluetoothControlActivity extends Activity {
                             Thread.sleep(3600); // 等待3.6秒
                         } catch (InterruptedException e) {
                             Log.e(TAG, "线程被中断", e);
-                            Thread.currentThread().interrupt(); // 恢复中断状态
+//                            Thread.currentThread().interrupt(); // 恢复中断状态
                         }
                     }
                 }
@@ -653,7 +653,8 @@ public class BluetoothControlActivity extends Activity {
                         try {
                             Thread.sleep(1000);
                         } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
+                            Log.e(TAG, "线程被中断", e);
+//                            Thread.currentThread().interrupt();
                         }
                     }
                     pairDevice(near_device);
@@ -666,7 +667,7 @@ public class BluetoothControlActivity extends Activity {
                             Thread.sleep(3600); // 等待3.6秒
                         } catch (InterruptedException e) {
                             Log.e(TAG, "线程被中断", e);
-                            Thread.currentThread().interrupt(); // 恢复中断状态
+//                            Thread.currentThread().interrupt(); // 恢复中断状态
                         }
                     }
                 }
@@ -1030,9 +1031,9 @@ public class BluetoothControlActivity extends Activity {
                     Log.d(TAG, "result: " + devicename + "配对失败");
 
                 } catch (Exception e) {
-                    Thread.currentThread().interrupt();
                     updateStatus("设备配对失败: " + device.getName());
                     Log.d(TAG, "result: " + devicename + "配对失败");
+//                    Thread.currentThread().interrupt();
                 }
                 auto_action = false;
             }).start();
@@ -1073,33 +1074,33 @@ public class BluetoothControlActivity extends Activity {
 
         if (hasPermissions()) {
             new Thread(() -> {
-                final boolean[] repair = {false};
+                boolean repair = false;
                 try {
                     String devicename = device.getName();
                     if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
                         updateStatus("设备正在连接: " + device.getName());
-                        Log.d("BluetoothProfile", "正在连接");
+                        Log.d(TAG,"BluetoothProfile:" + "正在连接");
                         try {
                             Method connectDevice = device.getClass().getMethod("connect");
                             boolean result = (Boolean) connectDevice.invoke(device);
                             if (result) {
-                                Log.d("BluetoothProfile", String.valueOf(true));
+                                Log.d(TAG,"BluetoothProfile: 连接成功");
                             }
 
                         } catch (NoSuchMethodException e) {
-                            Log.e("BluetoothMethods", "No such method", e);
+                            Log.e(TAG, "BluetoothMethods:" + "No such method", e);
                             DevHelper.connectA2dp(device);
                             DevHelper.connectHfp(device);
                         } catch (IllegalAccessException e) {
-                            Log.e("BluetoothMethods", "Illegal access", e);
+                            Log.e(TAG, "BluetoothMethods:" + "Illegal access", e);
                             DevHelper.connectA2dp(device);
                             DevHelper.connectHfp(device);
                         } catch (InvocationTargetException e) {
-                            Log.e("BluetoothMethods", "Invocation target exception", e);
+                            Log.e(TAG, "BluetoothMethods:" + "Invocation target exception", e);
                             DevHelper.connectA2dp(device);
                             DevHelper.connectHfp(device);
 //                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && device.getType() == BluetoothDevice.DEVICE_TYPE_LE) {
-//                                Log.d("BluetoothProfile", "这是一个LE Audio设备");
+//                                Log.d(TAG, "BluetoothProfile:" + "这是一个LE Audio设备");
 //                                return;
 //                            }else{
 //                                DevHelper.connectA2dp(device);
@@ -1111,29 +1112,30 @@ public class BluetoothControlActivity extends Activity {
 
                     long startTime = System.currentTimeMillis();
                     long duration = 20000; // 20秒超时
-                    while (System.currentTimeMillis() - startTime <= duration) {
-                        if (System.currentTimeMillis() - startTime > 10000 && !repair[0]) {
-                            BluetoothDevice near_device = discoveredDevicesMap.get(device.getAddress());
-                            if (Objects.equals(device, near_device)) {
-                                unpairDevice(device);
-                                pairDevice(device);
-                                repair[0] = true;
-                            }
-                        }
-
+                    long elapsedTime = System.currentTimeMillis() - startTime;
+                    while (elapsedTime <= duration) {
                         if (isDeviceConnected(device).isConnected()) {
                             updateStatus("设备已连接: " + devicename);
                             Log.d(TAG, "result: " + devicename + "已连接");
                             auto_action = false;
                             return;
                         }
+//                        if (System.currentTimeMillis() - startTime > 10000 && !repair) {
+//                            BluetoothDevice near_device = discoveredDevicesMap.get(device.getAddress());
+//                            if (Objects.equals(device, near_device)) {
+//                                unpairDevice(device);
+//                                pairDevice(device);
+//                                repair = true;
+//                            }
+//                        }
+                        Thread.sleep(100);
+                        elapsedTime = System.currentTimeMillis() - startTime;
                     }
-                    if (System.currentTimeMillis() - startTime > duration) {
+                    if (!isDeviceConnected(device).isConnected()) {
                         updateStatus("设备连接失败: " + devicename);
                         Log.d(TAG, "result: " + devicename + "连接失败");
                     }
                 } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
                     updateStatus("设备连接失败: " + device.getName());
                     Log.d(TAG, "result: " + device.getName() + "连接失败");
                 }
@@ -1228,7 +1230,6 @@ public class BluetoothControlActivity extends Activity {
                         }
                     }
                 } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
                     updateStatus("设备断链失败: " + device.getName());
                     Log.d(TAG, "result: " + device.getName() + "断链失败");
                 }
