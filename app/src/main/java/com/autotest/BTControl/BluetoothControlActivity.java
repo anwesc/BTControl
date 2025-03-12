@@ -1010,12 +1010,10 @@ public class BluetoothControlActivity extends Activity {
 
         if (hasPermissions()) {
             new Thread(() -> {
-                String devicename = "";
                 try {
                     long duration = 20000; // 20秒
                     long startTime = 0;
 
-                    devicename = device.getName();
                     if (device.getBondState() == BluetoothDevice.BOND_NONE) {
                         boolean pairingResult = device.createBond();
                         startTime = System.currentTimeMillis();
@@ -1032,7 +1030,7 @@ public class BluetoothControlActivity extends Activity {
                     while (elapsedTime < duration) {
                         if (isDeviceConnected(device).isConnected()) {
                             updateStatus("设备已连接: " + device.getName());
-                            Log.d(TAG, "result: " + devicename + "已连接");
+                            Log.d(TAG, "result: " + device.getName() + "已连接");
                             Log.d(TAG, "配对时间:" + elapsedTime + "ms");
                             auto_action = false;
                             return;
@@ -1063,11 +1061,11 @@ public class BluetoothControlActivity extends Activity {
                         elapsedTime = System.currentTimeMillis() - startTime;
                     }
                     updateStatus("设备配对失败: " + device.getName());
-                    Log.d(TAG, "result: " + devicename + "配对失败");
+                    Log.d(TAG, "result: " + device.getName() + "配对失败");
 
                 } catch (Exception e) {
                     updateStatus("设备配对失败: " + device.getName());
-                    Log.d(TAG, "result: " + devicename + "配对失败");
+                    Log.d(TAG, "result: " + device.getName() + "配对失败");
 //                    Thread.currentThread().interrupt();
                 }
                 auto_action = false;
@@ -1111,7 +1109,7 @@ public class BluetoothControlActivity extends Activity {
             new Thread(() -> {
                 boolean repair = false;
                 try {
-                    String devicename = device.getName();
+
                     if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
                         updateStatus("设备正在连接: " + device.getName());
                         Log.d(TAG,"BluetoothProfile:" + "正在连接");
@@ -1150,8 +1148,8 @@ public class BluetoothControlActivity extends Activity {
                     long elapsedTime = System.currentTimeMillis() - startTime;
                     while (elapsedTime <= duration) {
                         if (isDeviceConnected(device).isConnected()) {
-                            updateStatus("设备已连接: " + devicename);
-                            Log.d(TAG, "result: " + devicename + "已连接");
+                            updateStatus("设备已连接: " + device.getName());
+                            Log.d(TAG, "result: " + device.getName() + "已连接");
                             auto_action = false;
                             return;
                         }
@@ -1167,8 +1165,8 @@ public class BluetoothControlActivity extends Activity {
                         elapsedTime = System.currentTimeMillis() - startTime;
                     }
                     if (!isDeviceConnected(device).isConnected()) {
-                        updateStatus("设备连接失败: " + devicename);
-                        Log.d(TAG, "result: " + devicename + "连接失败");
+                        updateStatus("设备连接失败: " + device.getName());
+                        Log.d(TAG, "result: " + device.getName() + "连接失败");
                     }
                 } catch (InterruptedException e) {
                     updateStatus("设备连接失败: " + device.getName());
