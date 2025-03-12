@@ -16,6 +16,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -58,6 +59,7 @@ public class BluetoothControlActivity extends Activity {
 
     // Constants
     private static final int REQUEST_BLUETOOTH_PERMISSIONS = 1;
+    private static final int REQUEST_OVERLAY_PERMISSION = 2;
     private static final long AUTO_CONNECT_PERIOD = 60000;
     private final Handler handler = new Handler();
     // 添加 ExecutorService 作为成员变量
@@ -181,7 +183,9 @@ public class BluetoothControlActivity extends Activity {
         if (!hasPermissions()) {
             updateStatus("请求权限中...");
             requestPermissions();
-        } else {
+        }else if (!hasOverlayPermission()) {  // 新增“显示在其他应用上层”权限检查
+            requestOverlayPermission();
+        }else {
             isEventProcessing = false;
             auto_scan = true;
             startBluetoothDiscovery();
@@ -199,6 +203,11 @@ public class BluetoothControlActivity extends Activity {
                     ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         }
 
+    }
+
+    @SuppressLint("ObsoleteSdkInt")
+    private boolean hasOverlayPermission() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this);
     }
 
     private void requestPermissions() {
@@ -237,15 +246,37 @@ public class BluetoothControlActivity extends Activity {
         }
     }
 
+    private void requestOverlayPermission() {
+        if (!hasOverlayPermission()) {
+            updateStatus("请求‘显示在其他应用上层’权限...");
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivityForResult(intent, REQUEST_OVERLAY_PERMISSION);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_OVERLAY_PERMISSION) {
+            if (hasOverlayPermission()) {
+                updateStatus("‘显示在其他应用上层’权限已授予，开始扫描...");
+                startBluetoothDiscovery();
+            } else {
+                updateStatus("‘显示在其他应用上层’权限未授予");
+                finish();
+            }
+        }
+    }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_BLUETOOTH_PERMISSIONS) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                checkAndRequestPermissions();
                 updateStatus("权限授予成功，开始扫描...");
                 startBluetoothDiscovery();
-
             } else {
                 updateStatus("权限未授予");
                 finish();
@@ -1281,8 +1312,8 @@ public class BluetoothControlActivity extends Activity {
                         Log.d(TAG, "result: " + device.getName() + "解除配对成功");
                         if (Objects.equals(targetAction, "取消配对")){
                             auto_action = false;
-                            return;
                         }
+                        return;
                     } else {
                         updateStatus("解除配对失败: " + device.getName());
                         Log.d(TAG, "result: " + device.getName() + "解除配对失败");
