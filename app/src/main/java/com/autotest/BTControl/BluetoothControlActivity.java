@@ -20,6 +20,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.app.KeyguardManager;
 import android.util.Log;
@@ -61,7 +62,8 @@ public class BluetoothControlActivity extends Activity {
     private static final int REQUEST_BLUETOOTH_PERMISSIONS = 1;
     private static final int REQUEST_OVERLAY_PERMISSION = 2;
     private static final long AUTO_CONNECT_PERIOD = 60000;
-    private final Handler handler = new Handler();
+    private static final int AUTO_DISCOVERY_PERIOD = 2000;
+    private final Handler discovery_handler = new Handler(Looper.getMainLooper());
     // 添加 ExecutorService 作为成员变量
     private ExecutorService executorService;
 
@@ -183,13 +185,12 @@ public class BluetoothControlActivity extends Activity {
         if (!hasPermissions()) {
             updateStatus("请求权限中...");
             requestPermissions();
-        }else if (!hasOverlayPermission()) {  // 新增“显示在其他应用上层”权限检查
-            requestOverlayPermission();
-        }else {
-            isEventProcessing = false;
-            auto_scan = true;
-            startBluetoothDiscovery();
         }
+        if (!hasOverlayPermission()) {  // 新增“显示在其他应用上层”权限检查
+            requestOverlayPermission();
+        }
+        isEventProcessing = false;
+        startBluetoothDiscovery();
     }
 
     private boolean hasPermissions() {
@@ -421,9 +422,7 @@ public class BluetoothControlActivity extends Activity {
         public void run() {
             if (auto_scan) {
                 bluetoothAdapter.startDiscovery();
-                handler.postDelayed(this, AUTO_CONNECT_PERIOD); // Schedule next scan
-//                updateStatus("扫描已停止");
-//                auto_scan = false;
+                discovery_handler.postDelayed(this, AUTO_DISCOVERY_PERIOD); // Schedule next scan
             }
         }
     };
@@ -506,6 +505,7 @@ public class BluetoothControlActivity extends Activity {
     }
 
 
+    @SuppressLint("MissingPermission")
     private void startBluetoothDiscovery() {
         if (hasPermissions()) {
 
@@ -519,10 +519,9 @@ public class BluetoothControlActivity extends Activity {
 //                checkBox.setChecked(true);
 //                boolean checked = checkBox.isChecked();
 //            }
-            updateStatus("正在扫描...");
-//            bluetoothAdapter.startDiscovery();
+            bluetoothAdapter.startDiscovery();
             auto_scan = true;
-            discoveryRunnable.run();
+            discovery_handler.post(discoveryRunnable);
             startAutoThread();
 
         } else {
@@ -576,14 +575,15 @@ public class BluetoothControlActivity extends Activity {
                 runOnUiThread(() -> {
                     progressBar.setVisibility(View.VISIBLE);
                     actionButton.setText("停止");
-//                    updateStatus("正在扫描...");
+                    updateStatus("正在扫描...");
+                    Log.d(TAG, "正在进行蓝牙扫描...");
                 });
             } else {
                 runOnUiThread(() -> {
                     progressBar.setVisibility(View.GONE);
                     actionButton.setText("扫描");
-                    auto_scan = false;
-//                    updateStatus("扫描已停止!");
+                    updateStatus("扫描已停止!");
+                    Log.d(TAG, "蓝牙扫描已停止...");
                 });
             }
             if(auto_update){
@@ -595,7 +595,7 @@ public class BluetoothControlActivity extends Activity {
                 scheduler_ui.shutdown();
             }
 
-        },0, 1, TimeUnit.SECONDS); // 初始延迟为0，之后每秒执行一次
+        },1, 1, TimeUnit.SECONDS); // 初始延迟为0，之后每秒执行一次
 
 
         // 自动化操作线程
@@ -654,7 +654,7 @@ public class BluetoothControlActivity extends Activity {
 
         Log.d(TAG, "auto_action: " + "正在执行自动任务");
         int retryCount = 0;
-        final int maxRetries = 2;
+        final int maxRetries = 8;
         if (Objects.equals(targetAction, "扫描")) {
             BluetoothDevice near_device;
             while (retryCount <= maxRetries) {
@@ -668,7 +668,7 @@ public class BluetoothControlActivity extends Activity {
                     retryCount++;
                     if (retryCount <= maxRetries) {
                         try {
-                            Thread.sleep(3600); // 等待3.6秒
+                            Thread.sleep(6000); // 等待6秒
                         } catch (InterruptedException e) {
                             Log.e(TAG, "线程被中断", e);
 //                            Thread.currentThread().interrupt(); // 恢复中断状态
@@ -699,7 +699,7 @@ public class BluetoothControlActivity extends Activity {
                     retryCount++;
                     if (retryCount <= maxRetries) {
                         try {
-                            Thread.sleep(3600); // 等待3.6秒
+                            Thread.sleep(6000); // 等待6秒
                         } catch (InterruptedException e) {
                             Log.e(TAG, "线程被中断", e);
 //                            Thread.currentThread().interrupt(); // 恢复中断状态
@@ -761,7 +761,6 @@ public class BluetoothControlActivity extends Activity {
         if (hasPermissions()) {
             resetDeviceLists();
             registerReceiver(receiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
-            updateStatus("正在扫描...");
             bluetoothAdapter.startDiscovery();
 
         } else {
@@ -797,21 +796,19 @@ public class BluetoothControlActivity extends Activity {
                 return;
             }
         }
-
-        progressBar.setVisibility(View.GONE);
-        actionButton.setText("扫描");
+        if (auto_scan) {
+            auto_scan = false;
+            discovery_handler.removeCallbacks(discoveryRunnable);
+        }
         bluetoothAdapter.cancelDiscovery();
-        updateStatus("扫描已停止!");
-        auto_scan = false;
-        handler.removeCallbacks(discoveryRunnable);
     }
 
     private void startDiscovery_click() {
-        progressBar.setVisibility(View.VISIBLE);
-        actionButton.setText("停止");
-        updateStatus("正在扫描...");
         Bluetooth_Discovery();
-
+        if (!auto_scan) {
+            auto_scan = true;
+            discovery_handler.post(discoveryRunnable);
+        }
     }
 
     private void updateConnectedDeviceLists() {
@@ -843,7 +840,8 @@ public class BluetoothControlActivity extends Activity {
             }
         }
 
-        Log.d(TAG, "updateConnected: " +"正在更新已保存设备");
+        Log.d(TAG, "updateConnected: " + "正在更新已保存设备");
+
         new Thread(() -> {
 
             // 准备数据
