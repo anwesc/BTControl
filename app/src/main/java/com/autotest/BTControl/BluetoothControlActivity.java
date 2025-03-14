@@ -602,24 +602,22 @@ public class BluetoothControlActivity extends Activity {
         executorService.submit(() -> {
             try {
                 long startTime = System.currentTimeMillis();
-                while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD) {
+                while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD && auto_action) {
                     if (!first_get_CtdDev_finish) {
                         Thread.sleep(100);
                         continue;
                     }
-                    if (auto_action) {
-                        if (targetDeviceAddress != null && !targetDeviceAddress.isEmpty()) {
-                            handleAutoAction();
-                        } else {
-                            Log.d(TAG, "auto_action: " + "未传入正确的参数，自动化线程已停止");
-                        }
-                        break;
+                    if (targetDeviceAddress != null && !targetDeviceAddress.isEmpty()) {
+                        handleAutoAction();
+                    } else {
+                        Log.d(TAG, "auto_action: " + "未传入正确的参数，自动化操作线程已停止");
                     }
+                    auto_action = false;
                 }
+                Log.d(TAG, "auto_action: " + "自动化操作线程已停止");
             } catch (Exception e) {
                 Thread.currentThread().interrupt(); // 标记中断状态
             }
-            Log.d(TAG, "auto_action: " + "自动化操作线程已停止");
         });
     }
 
@@ -653,7 +651,7 @@ public class BluetoothControlActivity extends Activity {
         }
 
         Log.d(TAG, "auto_action: " + "正在执行自动任务");
-        int retryCount = 0;
+        int retryCount = 1;
         final int maxRetries = 8;
         if (Objects.equals(targetAction, "扫描")) {
             BluetoothDevice near_device;
@@ -661,7 +659,6 @@ public class BluetoothControlActivity extends Activity {
                 near_device = discoveredDevicesMap.get(targetDeviceAddress);
                 if (near_device != null) {
                     Log.d(TAG, "已发现设备: " + near_device.getName());
-                    auto_action = false;
                     break; // 如果发现设备，则退出循环
                 } else {
                     Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
@@ -671,7 +668,7 @@ public class BluetoothControlActivity extends Activity {
                             Thread.sleep(6000); // 等待6秒
                         } catch (InterruptedException e) {
                             Log.e(TAG, "线程被中断", e);
-//                            Thread.currentThread().interrupt(); // 恢复中断状态
+                            Thread.currentThread().interrupt();
                         }
                     }
                 }
@@ -686,10 +683,10 @@ public class BluetoothControlActivity extends Activity {
                     if (connected_device != null) {
                         unpairDevice(connected_device);
                         try {
-                            Thread.sleep(1000);
+                            Thread.sleep(5000);
                         } catch (InterruptedException e) {
                             Log.e(TAG, "线程被中断", e);
-//                            Thread.currentThread().interrupt();
+                            Thread.currentThread().interrupt();
                         }
                     }
                     pairDevice(near_device);
@@ -702,7 +699,7 @@ public class BluetoothControlActivity extends Activity {
                             Thread.sleep(6000); // 等待6秒
                         } catch (InterruptedException e) {
                             Log.e(TAG, "线程被中断", e);
-//                            Thread.currentThread().interrupt(); // 恢复中断状态
+                            Thread.currentThread().interrupt();
                         }
                     }
                 }
@@ -724,7 +721,6 @@ public class BluetoothControlActivity extends Activity {
             }
         } else {
             Log.e(TAG, "auto_action: " + "自动化操作未指定");
-            auto_action = false;
         }
     }
 
@@ -1027,11 +1023,6 @@ public class BluetoothControlActivity extends Activity {
                     long elapsedTime = System.currentTimeMillis() - startTime;
                     while (elapsedTime < duration) {
                         if (isDeviceConnected(device).isConnected()) {
-                            updateStatus("设备已连接: " + device.getName());
-                            Log.d(TAG, "result: " + device.getName() + "已连接");
-                            Log.d(TAG, "配对时间:" + elapsedTime + "ms");
-                            auto_action = false;
-                            return;
 //                            try {
 //                                for (Method method : device.getClass().getDeclaredMethods()) {
 //                                    Log.d("BluetoothMethods", method.getName());
@@ -1054,19 +1045,22 @@ public class BluetoothControlActivity extends Activity {
 //                            } catch (InvocationTargetException e) {
 //                                Log.e("BluetoothMethod", "Invocation target exception", e);
 //                            }
+                            break;
                         }
                         Thread.sleep(100);
                         elapsedTime = System.currentTimeMillis() - startTime;
                     }
-                    updateStatus("设备配对失败: " + device.getName());
-                    Log.d(TAG, "result: " + device.getName() + "配对失败");
-
+                    if (isDeviceConnected(device).isConnected()){
+                        updateStatus("设备已连接: " + device.getName());
+                        Log.d(TAG, "result: " + device.getName() + "已连接");
+                        Log.d(TAG, "配对时间:" + elapsedTime + "ms");
+                    }else{
+                        updateStatus("设备配对失败: " + device.getName());
+                        Log.d(TAG, "result: " + device.getName() + "配对失败");
+                    }
                 } catch (Exception e) {
-                    updateStatus("设备配对失败: " + device.getName());
-                    Log.d(TAG, "result: " + device.getName() + "配对失败");
-//                    Thread.currentThread().interrupt();
+                    Thread.currentThread().interrupt();
                 }
-                auto_action = false;
             }).start();
         } else {
             updateStatus("BLUETOOTH_CONNECT 权限未授予");
@@ -1148,7 +1142,6 @@ public class BluetoothControlActivity extends Activity {
                         if (isDeviceConnected(device).isConnected()) {
                             updateStatus("设备已连接: " + device.getName());
                             Log.d(TAG, "result: " + device.getName() + "已连接");
-                            auto_action = false;
                             return;
                         }
 //                        if (System.currentTimeMillis() - startTime > 10000 && !repair) {
@@ -1170,7 +1163,6 @@ public class BluetoothControlActivity extends Activity {
                     updateStatus("设备连接失败: " + device.getName());
                     Log.d(TAG, "result: " + device.getName() + "连接失败");
                 }
-                auto_action = false;
             }).start();
         } else {
             updateStatus("BLUETOOTH_CONNECT 权限未授予");
@@ -1250,7 +1242,6 @@ public class BluetoothControlActivity extends Activity {
                             if (!isDeviceConnected(device).isConnected()) {
                                 updateStatus("设备已断链: " + device.getName());
                                 Log.d(TAG, "result: " + device.getName() + "已断链");
-                                auto_action = false;
                                 return;
                             }
                         }
@@ -1263,7 +1254,6 @@ public class BluetoothControlActivity extends Activity {
                     updateStatus("设备断链失败: " + device.getName());
                     Log.d(TAG, "result: " + device.getName() + "断链失败");
                 }
-                auto_action = false;
             }).start();
         } else {
             updateStatus("BLUETOOTH_CONNECT 权限未授予");
@@ -1306,10 +1296,6 @@ public class BluetoothControlActivity extends Activity {
                     if (result) {
                         updateStatus("设备已解除配对: " + device.getName());
                         Log.d(TAG, "result: " + device.getName() + "解除配对成功");
-                        if (Objects.equals(targetAction, "取消配对")){
-                            auto_action = false;
-                        }
-                        return;
                     } else {
                         updateStatus("解除配对失败: " + device.getName());
                         Log.d(TAG, "result: " + device.getName() + "解除配对失败");
@@ -1317,7 +1303,6 @@ public class BluetoothControlActivity extends Activity {
                 } catch (Exception e) {
                     Log.e(TAG, "error: " + e);
                 }
-                auto_action = false;
             }).start();
         } else {
             updateStatus("BLUETOOTH_CONNECT 权限未授予");
