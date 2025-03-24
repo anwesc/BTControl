@@ -422,8 +422,8 @@ public class BluetoothControlActivity extends Activity {
         public void run() {
             if (auto_scan) {
                 bluetoothAdapter.startDiscovery();
-                discovery_handler.postDelayed(this, AUTO_DISCOVERY_PERIOD); // Schedule next scan
             }
+            discovery_handler.postDelayed(this, AUTO_DISCOVERY_PERIOD); // Schedule next scan
         }
     };
 
@@ -659,6 +659,7 @@ public class BluetoothControlActivity extends Activity {
                 near_device = discoveredDevicesMap.get(targetDeviceAddress);
                 if (near_device != null) {
                     Log.d(TAG, "已发现设备: " + near_device.getName());
+                    auto_scan = false;
                     break; // 如果发现设备，则退出循环
                 } else {
                     Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
@@ -676,20 +677,55 @@ public class BluetoothControlActivity extends Activity {
         } else if (Objects.equals(targetAction, "配对")) {
             BluetoothDevice near_device;
             while (retryCount <= maxRetries) {
+                BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
+                if (connected_device != null) {
+                    unpairDevice(connected_device);
+                    try {
+                        Thread.sleep(4800);
+                    } catch (InterruptedException e) {
+                        Log.e(TAG, "线程被中断", e);
+                        Thread.currentThread().interrupt();
+                    }
+                }
                 near_device = discoveredDevicesMap.get(targetDeviceAddress);
                 if (near_device != null) {
                     Log.d(TAG, "已发现设备: " + near_device.getName());
-                    BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
-                    if (connected_device != null) {
-                        unpairDevice(connected_device);
+                    auto_scan = false;
+                    pairDevice(near_device);
+                    auto_scan = true;
+                    break; // 如果发现设备，则配对并退出循环
+                } else {
+                    Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
+                    retryCount++;
+                    if (retryCount <= maxRetries) {
                         try {
-                            Thread.sleep(5000);
+                            Thread.sleep(6000); // 等待6秒
                         } catch (InterruptedException e) {
                             Log.e(TAG, "线程被中断", e);
                             Thread.currentThread().interrupt();
                         }
                     }
+                }
+            }
+        }else if (Objects.equals(targetAction, "重新配对")) {
+            BluetoothDevice near_device;
+            while (retryCount <= maxRetries) {
+                BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
+                if (connected_device != null) {
+                    unpairDevice(connected_device);
+                    try {
+                        Thread.sleep(10000);
+                    } catch (InterruptedException e) {
+                        Log.e(TAG, "线程被中断", e);
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                near_device = discoveredDevicesMap.get(targetDeviceAddress);
+                if (near_device != null) {
+                    Log.d(TAG, "已发现设备: " + near_device.getName());
+                    auto_scan = false;
                     pairDevice(near_device);
+                    auto_scan = true;
                     break; // 如果发现设备，则配对并退出循环
                 } else {
                     Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
@@ -705,16 +741,19 @@ public class BluetoothControlActivity extends Activity {
                 }
             }
         } else if (Objects.equals(targetAction, "连接")) {
+            auto_scan = false;
             BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
             if (connected_device != null) {
                 connectToDevice(connected_device);
             }
         } else if (Objects.equals(targetAction, "断链")) {
+            auto_scan = false;
             BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
             if (connected_device != null) {
                 disconnectDevice(connected_device);
             }
         }else if (Objects.equals(targetAction, "取消配对")) {
+            auto_scan = false;
             BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
             if (connected_device != null) {
                 unpairDevice(connected_device);
@@ -1144,14 +1183,6 @@ public class BluetoothControlActivity extends Activity {
                             Log.d(TAG, "result: " + device.getName() + "已连接");
                             return;
                         }
-//                        if (System.currentTimeMillis() - startTime > 10000 && !repair) {
-//                            BluetoothDevice near_device = discoveredDevicesMap.get(device.getAddress());
-//                            if (Objects.equals(device, near_device)) {
-//                                unpairDevice(device);
-//                                pairDevice(device);
-//                                repair = true;
-//                            }
-//                        }
                         Thread.sleep(100);
                         elapsedTime = System.currentTimeMillis() - startTime;
                     }
