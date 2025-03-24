@@ -1,8 +1,11 @@
 package com.autotest.BTControl;
 
 import android.accessibilityservice.AccessibilityService;
+import android.annotation.SuppressLint;
 import android.app.KeyguardManager;
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.view.Gravity;
 import android.view.View;
@@ -13,13 +16,20 @@ import android.util.Log;
 import android.widget.LinearLayout;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MyAccessibilityService extends AccessibilityService {
 
     private static final String TAG = "BTControl:(MyAccessibilityService)";
     private PowerManager.WakeLock wakeLock;
     private View overlayView;
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private long lastEventTime = 0;
+    private static final long EVENT_DEBOUNCE_TIME = 500; // 500ms 防抖
 
+    @SuppressLint("Wakelock")
     @Override
     public void onServiceConnected() {
         super.onServiceConnected();
@@ -65,7 +75,7 @@ public class MyAccessibilityService extends AccessibilityService {
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
                         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON, // 关键 FLAG
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
                 android.graphics.PixelFormat.TRANSLUCENT
         );
 
@@ -76,97 +86,117 @@ public class MyAccessibilityService extends AccessibilityService {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT
         ));
+//        overlayView.setBackgroundColor(0x55000000); // 设置半透明背景
 
         windowManager.addView(overlayView, params);
         Log.d(TAG, "Screen kept ON via WindowManager overlay.");
-    }
 
+        // 5秒后移除遮罩
+        mainHandler.postDelayed(() -> {
+            if (overlayView != null) {
+                windowManager.removeView(overlayView);
+                overlayView = null;
+                Log.d(TAG, "Overlay removed after delay.");
+            }
+        }, 5000);
+    }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null) return;
 
         int eventType = event.getEventType();
-        Log.d(TAG, "Event type: " + eventType);
+        Log.d(TAG, "事件类型: " + eventType);
 
-        if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
-                eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            handleWindowChangeEvent();
+        if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            eventType != AccessibilityEvent.WINDOWS_CHANGE_FOCUSED &&
+            eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+            eventType != AccessibilityEvent.TYPE_VIEW_SCROLLED){
+            return;
         }
+
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastEventTime < EVENT_DEBOUNCE_TIME) {
+            Log.d(TAG, "跳过短时间内的重复事件");
+            return;
+        }
+        lastEventTime = currentTime;
+
+        handleWindowChangeEvent();
     }
 
     private void handleWindowChangeEvent() {
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode == null) return;
 
-        // 处理USB弹窗
-        handleUsbDialogs(rootNode);
-
-        // 处理蓝牙配对
+        // 处理蓝牙配对 & 处理 USB 弹窗
         handleBluetoothPairing(rootNode);
+        handleOtherDialogs(rootNode);
     }
 
     /**
-     * 处理 USB 相关的弹窗
+     * 处理 USB及其他相关的弹窗
      */
-    private void handleUsbDialogs(AccessibilityNodeInfo rootNode) {
-        List<AccessibilityNodeInfo> usbNodes = rootNode.findAccessibilityNodeInfosByText("USB 用于");
-        for (AccessibilityNodeInfo node : usbNodes) {
-            CharSequence text = node.getText();
-            if (text != null && text.toString().contains("USB 用于")) {
-                try {
-                    Thread.sleep(3000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt(); // 标记中断状态
-                }
-                performGlobalAction(GLOBAL_ACTION_BACK);
-                Log.d(TAG, "GLOBAL_ACTION_BACK: " + text);
-            }
-        }
-
-        List<AccessibilityNodeInfo> usbConnectsNodes = rootNode.findAccessibilityNodeInfosByText("USB 连接方式");
-        if (!usbConnectsNodes.isEmpty()) {
-            List<AccessibilityNodeInfo> cancelNodes = rootNode.findAccessibilityNodeInfosByText("取消");
-            for (AccessibilityNodeInfo cancelNode : cancelNodes) {
-                if (cancelNode.isClickable()) {
-                    cancelNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    Log.d(TAG, "Clicked '取消' to dismiss USB dialog.");
+    private void handleOtherDialogs(AccessibilityNodeInfo rootNode) {
+        executor.execute(() -> {
+            List<AccessibilityNodeInfo> warningNodes = rootNode.findAccessibilityNodeInfosByText("长时间保持高音量可能会损伤听力");
+            if (!warningNodes.isEmpty()) {
+                List<AccessibilityNodeInfo> confirmNodes = rootNode.findAccessibilityNodeInfosByText("确定");
+                for (AccessibilityNodeInfo confirmNode : confirmNodes) {
+                    if (confirmNode.isClickable()) {
+                        confirmNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                        Log.d(TAG, "点击'确定'关闭音量损伤弹窗.");
+                    }
                 }
             }
-        }
-
-        List<AccessibilityNodeInfo> warningNodes = rootNode.findAccessibilityNodeInfosByText("长时间保持高音量可能会损伤听力");
-        if (!warningNodes.isEmpty()) {
-            List<AccessibilityNodeInfo> confirmNodes = rootNode.findAccessibilityNodeInfosByText("确定");
-            for (AccessibilityNodeInfo confirmNode : confirmNodes) {
-                if (confirmNode.isClickable()) {
-                    confirmNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    Log.d(TAG, "Clicked '确定' to dismiss high volume warning.");
+        });
+        executor.execute(() -> {
+            List<AccessibilityNodeInfo> usbNodes = rootNode.findAccessibilityNodeInfosByText("USB 用于");
+            for (AccessibilityNodeInfo node : usbNodes) {
+                CharSequence text = node.getText();
+                if (text != null && text.toString().contains("USB 用于")) {
+                    mainHandler.postDelayed(() -> {
+                        performGlobalAction(GLOBAL_ACTION_BACK);
+                        Log.d(TAG, "延迟3秒后执行: 关闭 USB 弹窗 " + text);
+                    }, 3000); // 延迟3秒执行
                 }
             }
-        }
+        });
+        executor.execute(() -> {
+            List<AccessibilityNodeInfo> usbConnectsNodes = rootNode.findAccessibilityNodeInfosByText("USB 连接方式");
+            if (!usbConnectsNodes.isEmpty()) {
+                List<AccessibilityNodeInfo> cancelNodes = rootNode.findAccessibilityNodeInfosByText("取消");
+                for (AccessibilityNodeInfo cancelNode : cancelNodes) {
+                    if (cancelNode.isClickable()) {
+                        mainHandler.postDelayed(() -> {
+                            cancelNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                            Log.d(TAG, "延迟3秒后点击'取消'关闭 USB 弹窗.");
+                        }, 3000); // 延迟3秒执行
+                    }
+                }
+            }
+        });
     }
 
     /**
      * 处理蓝牙配对
      */
     private void handleBluetoothPairing(AccessibilityNodeInfo rootNode) {
-        List<AccessibilityNodeInfo> pairsNodes = rootNode.findAccessibilityNodeInfosByText("配对");
-        for (AccessibilityNodeInfo pairsNode : pairsNodes) {
-            CharSequence text = pairsNode.getText();
-            if (text != null && text.toString().contains("配对") &&
-                    !text.toString().matches(".*(已|取消|与|通讯录).*")) {
-                if (pairsNode.isClickable()) {
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt(); // 标记中断状态
+        executor.execute(() -> {
+            List<AccessibilityNodeInfo> pairsNodes = rootNode.findAccessibilityNodeInfosByText("配对");
+            for (AccessibilityNodeInfo pairsNode : pairsNodes) {
+                CharSequence text = pairsNode.getText();
+                if (text != null && text.toString().contains("配对") &&
+                        !text.toString().matches(".*(已|取消|与|通讯录).*")) {
+                    if (pairsNode.isClickable()) {
+                        mainHandler.postDelayed(() -> {
+                            pairsNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                            Log.d(TAG, "延迟1秒点击'配对'按钮: " + text);
+                        }, 1000); // 延迟1秒执行
                     }
-                    pairsNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    Log.d(TAG, "Clicked '配对' button: " + text);
                 }
             }
-        }
+        });
     }
 
     @Override
@@ -189,5 +219,8 @@ public class MyAccessibilityService extends AccessibilityService {
                 Log.d(TAG, "Overlay removed.");
             }
         }
+
+        executor.shutdown();
+        Log.d(TAG, "ExecutorService shutdown.");
     }
 }
