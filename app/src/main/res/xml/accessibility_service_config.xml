@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeAllMask"
-    android:packageNames="com.android.settings,com.autotest.BTControl,com.android.systemui"
-    android:accessibilityFeedbackType="feedbackHaptic"
-    android:notificationTimeout="1000"
+    android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged|typeWindowsChanged|typeNotificationStateChanged|typeViewFocused"
+    android:packageNames="com.oplus.wirelesssettings,com.android.systemui,com.android.settings"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="100"
     android:canRetrieveWindowContent="true"
     android:accessibilityFlags="flagDefault"/>
