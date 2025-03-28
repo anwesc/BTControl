@@ -1040,7 +1040,7 @@ public class BluetoothControlActivity extends Activity {
         if (hasPermissions()) {
             new Thread(() -> {
                 try {
-                    long duration = 20000; // 20秒
+                    long duration = 30000; // 30秒
                     long startTime = 0;
                     if (device.getBondState() == BluetoothDevice.BOND_NONE) {
                         boolean pairingResult = device.createBond();
@@ -1170,7 +1170,7 @@ public class BluetoothControlActivity extends Activity {
                     Thread.sleep(1000);
 
                     long startTime = System.currentTimeMillis();
-                    long duration = 20000; // 20秒超时
+                    long duration = 30000; // 30秒超时
                     long elapsedTime = System.currentTimeMillis() - startTime;
                     while (elapsedTime <= duration) {
                         if (isDeviceConnected(device).isConnected()) {
