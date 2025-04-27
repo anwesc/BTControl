@@ -1,0 +1,33 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- 主色调：深蓝偏黑 -->
+    <color name="colorPrimary">#0D47A1</color> <!-- 更深更稳的蓝 -->
+    <color name="colorPrimaryVariant">#002171</color> <!-- 深蓝黑色 -->
+    <color name="colorOnPrimary">#FFFFFF</color> <!-- 白字 -->
+
+    <!-- 次色调：低调蓝绿 -->
+    <color name="colorSecondary">#00838F</color> <!-- 深蓝绿 -->
+    <color name="colorSecondaryVariant">#005662</color> <!-- 更深蓝绿 -->
+    <color name="colorOnSecondary">#FFFFFF</color> <!-- 白字 -->
+
+    <!-- 背景和字体 -->
+    <color name="background">#121212</color> <!-- 夜间背景 -->
+    <color name="textPrimary">#FFFFFF</color> <!-- 亮白字 -->
+    <color name="textSecondary">#B0B0B0</color> <!-- 浅灰辅助字 -->
+    <color name="colorPrimaryDark">#4A148C</color> <!-- 深色主色 -->
+
+    <color name="purple_200">#D1C4E9</color> <!-- 紫色200 -->
+    <color name="purple_500">#9C27B0</color> <!-- 紫色500 -->
+    <color name="purple_700">#7B1FA2</color> <!-- 紫色700 -->
+    <color name="purple_900">#4A148C</color> <!-- 更深的紫色 -->
+    <color name="teal_200">#80CBC4</color> <!-- 蓝绿色200 -->
+    <color name="teal_500">#00897B</color> <!-- 深青色 -->
+    <color name="teal_700">#00796B</color> <!-- 蓝绿色700 -->
+    <color name="grey_700">#616161</color> <!-- 适当的灰色 -->
+    <color name="grey_400">#BDBDBD</color> <!-- 适当的灰色 -->
+
+    <color name="colorChecked">#81C784</color> <!-- 示例绿色 -->
+    <color name="colorUnchecked">#757575</color> <!-- 示例灰色 -->
+    <color name="selected_bg_color">#80DEEA</color> <!-- 示例浅蓝色 -->
+    <color name="card_stroke_color">#555555</color> <!-- 深灰 -->
+
+</resources>

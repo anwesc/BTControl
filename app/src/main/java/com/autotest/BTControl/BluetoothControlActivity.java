@@ -22,14 +22,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.PowerManager;
 import android.util.Log;
 import android.view.View;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.ImageView;
-import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.provider.Settings;
@@ -38,12 +35,13 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -63,7 +61,9 @@ public class BluetoothControlActivity extends Activity {
     private static final int REQUEST_OVERLAY_PERMISSION = 1002;
     private static final int REQUEST_FOREGROUND_SERVICE = 1003;
     private static final long AUTO_CONNECT_PERIOD = 60000;
-    private static final int AUTO_DISCOVERY_PERIOD = 2000;
+    private static final int AUTO_DISCOVERY_PERIOD = 1000;
+    private static final long MAX_DISCOVERY_DURATION = 5 * 60 * 1000; // 5分钟 = 300,000毫秒
+    private long discoveryStartTime = 0;
     private final Handler discovery_handler = new Handler(Looper.getMainLooper());
     // 添加 ExecutorService 作为成员变量
     private ExecutorService executorService;
@@ -72,9 +72,6 @@ public class BluetoothControlActivity extends Activity {
     private TextView statusTextView;
     private CheckBox checkBox;
     private ProgressBar progressBar;
-    private ListView deviceListView;
-    private ListView nfdeviceListView;
-    private ListView connectedDeviceListView;
     private Button actionButton;
 
     // Bluetooth-related
@@ -86,12 +83,12 @@ public class BluetoothControlActivity extends Activity {
     private String targetAction;
 
     // List Adapters
-    private ArrayAdapter<String> deviceListAdapter;
-    private ArrayAdapter<String> connectedDeviceListAdapter;
-    private MyArrayAdapter nfdeviceListAdapter;
+    private BTDeviceAdapter nrdeviceListAdapter;
+    private BTDeviceAdapter connectedDeviceListAdapter;
+    private BTDeviceAdapter nfdeviceListAdapter;
 
     // Device Lists
-    private final ArrayList<String> deviceList = new ArrayList<>();
+    private final ArrayList<String> nrdeviceList = new ArrayList<>();
     private final ArrayList<String> nfdeviceList = new ArrayList<>();
     private final HashMap<String, BluetoothDevice> discoveredDevicesMap = new HashMap<>();
     private final HashMap<String, BluetoothDevice> NFDevicesMap = new HashMap<>();
@@ -134,21 +131,36 @@ public class BluetoothControlActivity extends Activity {
     private void initializeUI() {
         statusTextView = findViewById(R.id.statusTextView);
         progressBar = findViewById(R.id.progressBar);
-        deviceListView = findViewById(R.id.deviceListView);
-        nfdeviceListView = findViewById(R.id.NFDeviceListView);
-        connectedDeviceListView = findViewById(R.id.connectedDeviceListView);
+        RecyclerView NRDeviceRecyclerView = findViewById(R.id.NRDeviceRecyclerView);
+        RecyclerView NFDeviceRecyclerView = findViewById(R.id.NFDeviceRecyclerView);
+        RecyclerView connectedDeviceRecyclerView = findViewById(R.id.connectedDeviceRecyclerView);
         actionButton = findViewById(R.id.actionButton);
         checkBox = findViewById(R.id.checkBox);
 
-        deviceListAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, deviceList);
-        connectedDeviceListAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, connectedDeviceList);
+        nrdeviceListAdapter = new BTDeviceAdapter(nrdeviceList, position -> {
+            // 这里写点击后的操作，比如：
+            String deviceInfo = nrdeviceList.get(position);
+            updateStatus("你点击了 常用设备: " + deviceInfo);
+        });
 
-        deviceListView.setAdapter(deviceListAdapter);
-        connectedDeviceListView.setAdapter(connectedDeviceListAdapter);
+        connectedDeviceListAdapter = new BTDeviceAdapter(connectedDeviceList, position -> {
+            // 这里写点击后的操作，比如：
+            String deviceInfo = connectedDeviceList.get(position);
+            updateStatus("你点击了 已连接设备: " + deviceInfo);
+        });
 
-        nfdeviceListAdapter = new MyArrayAdapter(this, nfdeviceList);
-        nfdeviceListView.setAdapter(nfdeviceListAdapter);
+        NRDeviceRecyclerView.setAdapter(nrdeviceListAdapter);
+        NRDeviceRecyclerView.setLayoutManager(new LinearLayoutManager(this)); // 一定要设置 LayoutManager
+        connectedDeviceRecyclerView.setAdapter(connectedDeviceListAdapter);
+        connectedDeviceRecyclerView.setLayoutManager(new LinearLayoutManager(this)); // 一定要设置 LayoutManager
 
+        nfdeviceListAdapter = new BTDeviceAdapter(nfdeviceList, position -> {
+            // 这里写点击后的操作，比如：
+            String deviceInfo = nfdeviceList.get(position);
+            updateStatus("你点击了 非常用设备: " + deviceInfo);
+        });
+        NFDeviceRecyclerView.setAdapter(nfdeviceListAdapter);
+        NFDeviceRecyclerView.setLayoutManager(new LinearLayoutManager(this)); // 一定要设置 LayoutManager
     }
 
     private void initializeBluetooth() {
@@ -298,14 +310,14 @@ public class BluetoothControlActivity extends Activity {
 
     @SuppressLint("MissingPermission")
     private void setupListViewListeners() {
-        deviceListView.setOnItemClickListener((parent, view, position, id) -> {
+        nrdeviceListAdapter.setOnItemClickListener(position -> {
             if (isEventProcessing) {
-                return; // 正在处理其他事件，忽略新的事件
+                return;
             }
-            isEventProcessing = true; // 开始处理事件
+            isEventProcessing = true;
             auto_scan = false;
             try {
-                String deviceInfo = deviceList.get(position);
+                String deviceInfo = nrdeviceList.get(position);
                 BluetoothDevice device = discoveredDevicesMap.get(getDeviceAddress(deviceInfo));
                 if (device != null) {
                     updateStatus("正在连接设备: " + device.getName() + " [" + device.getAddress() + "]");
@@ -313,26 +325,25 @@ public class BluetoothControlActivity extends Activity {
                 } else {
                     updateStatus("设备信息未找到");
                 }
-            }catch (Exception e){
-                updateStatus("错误信息" + e);
-            }finally {
-                isEventProcessing = false; // 事件处理完毕
+            } catch (Exception e) {
+                updateStatus("错误信息: " + e);
+            } finally {
+                isEventProcessing = false;
             }
         });
 
-        connectedDeviceListView.setOnItemClickListener((parent, view, position, id) -> {
+        connectedDeviceListAdapter.setOnItemClickListener(position -> {
+            if (System.currentTimeMillis() - lastClickTime < CLICK_DELAY) {
+                return;
+            }
+            lastClickTime = System.currentTimeMillis();
+            if (isEventProcessing) {
+                return;
+            }
+            isEventProcessing = true;
+            auto_scan = false;
             try {
                 if (position >= 0 && position < connectedDeviceList.size()) {
-                    if (System.currentTimeMillis() - lastClickTime < CLICK_DELAY) {
-                        return; // 如果在1秒内再次点击则直接返回，不处理
-                    }
-                    lastClickTime = System.currentTimeMillis(); // 记录上次点击时间
-
-                    if (isEventProcessing) {
-                        return; // 正在处理其他事件，忽略新的事件
-                    }
-                    isEventProcessing = true; // 开始处理事件
-                    auto_scan = false;
                     String deviceInfo = connectedDeviceList.get(position);
                     BluetoothDevice device = connectedDevicesMap.get(getDeviceAddress(deviceInfo));
                     if (device != null) {
@@ -342,18 +353,18 @@ public class BluetoothControlActivity extends Activity {
                                 Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
                                 startActivity(intent);
                                 Toast.makeText(this, "LE Audio设备请在蓝牙设置页面控制", Toast.LENGTH_SHORT).show();
-                                return;
+                            } else {
+                                disconnectDevice(device);
                             }
-                            disconnectDevice(device);
                         } else {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkBox.isChecked()) {
                                 Log.d("BluetoothProfile", "这是一个LE Audio设备");
                                 Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
                                 startActivity(intent);
                                 Toast.makeText(this, "LE Audio设备请在蓝牙设置页面控制", Toast.LENGTH_SHORT).show();
-                                return;
+                            } else {
+                                connectToDevice(device);
                             }
-                            connectToDevice(device);
                         }
                     } else {
                         updateStatus("设备信息未找到");
@@ -361,21 +372,22 @@ public class BluetoothControlActivity extends Activity {
                 } else {
                     updateStatus("位置无效");
                 }
-            }catch (Exception e){
-                updateStatus("错误信息" + e);
-            }finally {
-                isEventProcessing = false; // 事件处理完毕
+            } catch (Exception e) {
+                updateStatus("错误信息: " + e);
+            } finally {
+                isEventProcessing = false;
             }
         });
 
-        connectedDeviceListView.setOnItemLongClickListener((parent, view, position, id) -> {
+        // 长按断开配对
+        connectedDeviceListAdapter.setOnItemLongClickListener(position -> {
+            if (isEventProcessing) {
+                return ;
+            }
+            isEventProcessing = true;
+            auto_scan = false;
             try {
                 if (position >= 0 && position < connectedDeviceList.size()) {
-                    if (isEventProcessing) {
-                        return false; // 正在处理其他事件，忽略新的事件
-                    }
-                    isEventProcessing = true; // 开始处理事件
-                    auto_scan = false;
                     String deviceInfo = connectedDeviceList.get(position);
                     BluetoothDevice device = connectedDevicesMap.get(getDeviceAddress(deviceInfo));
                     if (device != null) {
@@ -383,25 +395,17 @@ public class BluetoothControlActivity extends Activity {
                     } else {
                         updateStatus("设备信息未找到");
                     }
-                    return true;
                 } else {
                     updateStatus("位置无效");
-                    return false;
                 }
-            }catch (Exception e){
-                updateStatus("错误信息" + e);
-            }finally {
-                isEventProcessing = false; // 事件处理完毕
+            } catch (Exception e) {
+                updateStatus("错误信息: " + e);
+            } finally {
+                isEventProcessing = false;
             }
-            return false;
-        });
-
-        ImageView imageAccessibilitySettings = findViewById(R.id.image_accessibility_settings);
-        imageAccessibilitySettings.setOnClickListener(v -> {
-            // 跳转到无障碍设置页面
-            startAccessibilityService();
         });
     }
+
 
     private String getDeviceAddress(String deviceInfo) {
         try {
@@ -415,6 +419,8 @@ public class BluetoothControlActivity extends Activity {
 
     @SuppressLint("MissingPermission")
     private void setupActionButtonListener() {
+        ImageView imageAccessibilitySettings = findViewById(R.id.image_accessibility_settings);
+        imageAccessibilitySettings.setOnClickListener(v -> startAccessibilityService());
         actionButton.setOnClickListener(v -> {
             if (hasPermissions()) {
                 registerReceiver(receiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
@@ -435,9 +441,15 @@ public class BluetoothControlActivity extends Activity {
         @Override
         public void run() {
             if (auto_scan) {
-                bluetoothAdapter.startDiscovery();
+                long elapsed = System.currentTimeMillis() - discoveryStartTime;
+                if (elapsed < MAX_DISCOVERY_DURATION) {
+                    bluetoothAdapter.startDiscovery();
+                    discovery_handler.postDelayed(this, AUTO_DISCOVERY_PERIOD); // Schedule next scan
+                } else {
+                    auto_scan = false; // 超过5分钟，停止扫描
+                    bluetoothAdapter.cancelDiscovery();
+                }
             }
-            discovery_handler.postDelayed(this, AUTO_DISCOVERY_PERIOD); // Schedule next scan
         }
     };
 
@@ -545,6 +557,7 @@ public class BluetoothControlActivity extends Activity {
             auto_update = true;
             bluetoothAdapter.startDiscovery();
             auto_scan = true;
+            discoveryStartTime = System.currentTimeMillis();
             discovery_handler.post(discoveryRunnable);
 
             startAutoThread();
@@ -554,11 +567,12 @@ public class BluetoothControlActivity extends Activity {
     }
 
 
+    @SuppressLint("NotifyDataSetChanged")
     private void resetDeviceLists() {
-        deviceList.clear();
+        nrdeviceList.clear();
         nfdeviceList.clear();
         discoveredDevicesMap.clear();
-        deviceListAdapter.notifyDataSetChanged();
+        nrdeviceListAdapter.notifyDataSetChanged();
         nfdeviceListAdapter.notifyDataSetChanged();
     }
 
@@ -610,6 +624,9 @@ public class BluetoothControlActivity extends Activity {
                     Log.d(TAG, "蓝牙扫描已停止...");
                 });
             }
+        },1, 1000, TimeUnit.MILLISECONDS); // 初始延迟为0，之后每每秒执行一次
+
+        scheduler_ui.scheduleWithFixedDelay(() -> {
             if(auto_update){
                 updateConnectedDeviceLists();
             }
@@ -618,9 +635,7 @@ public class BluetoothControlActivity extends Activity {
                 Log.d(TAG, "auto_update: " + "自动刷新ui线程已停止");
                 scheduler_ui.shutdown();
             }
-
-        },1, 1, TimeUnit.SECONDS); // 初始延迟为0，之后每秒执行一次
-
+        },1, 1000, TimeUnit.MILLISECONDS); // 初始延迟为0，之后每秒执行一次
 
         // 自动化操作线程
         executorService.submit(() -> {
@@ -679,7 +694,7 @@ public class BluetoothControlActivity extends Activity {
 
         Log.d(TAG, "auto_action: " + "正在执行自动任务");
         int retryCount = 1;
-        final int maxRetries = 8;
+        final int maxRetries = 10;
         if (Objects.equals(targetAction, "扫描")) {
             BluetoothDevice near_device;
             while (retryCount <= maxRetries) {
@@ -742,7 +757,7 @@ public class BluetoothControlActivity extends Activity {
                 if (connected_device != null) {
                     unpairDevice(connected_device);
                     try {
-                        Thread.sleep(11111);
+                        Thread.sleep(20000);
                     } catch (InterruptedException e) {
                         Log.e(TAG, "线程被中断", e);
                         Thread.currentThread().interrupt();
@@ -867,14 +882,15 @@ public class BluetoothControlActivity extends Activity {
     }
 
     private void startDiscovery_click() {
-        Bluetooth_Discovery();
+//        Bluetooth_Discovery();
+        discoveryStartTime = System.currentTimeMillis();
         if (!auto_scan) {
             auto_scan = true;
             discovery_handler.post(discoveryRunnable);
         }
     }
 
-    @SuppressLint("MissingPermission")
+    @SuppressLint({"MissingPermission", "NotifyDataSetChanged"})
     private void updateConnectedDeviceLists() {
         Log.d(TAG, "updateConnected: " + "正在更新已保存设备");
 
@@ -951,17 +967,11 @@ public class BluetoothControlActivity extends Activity {
 
         try {
             // 使用异步方法检查各个设备的连接状态
-            checkHfpDeviceConnection(deviceAddress, isConnected -> {
-                handleConnectionStatus(isConnected, currentStatus, strConnected, "HFP", 0, latch);
-            });
+            checkHfpDeviceConnection(deviceAddress, isConnected -> handleConnectionStatus(isConnected, currentStatus, strConnected, "HFP", 0, latch));
 
-            checkA2dpDeviceConnection(deviceAddress, isConnected -> {
-                handleConnectionStatus(isConnected, currentStatus, strConnected, "A2DP", 1, latch);
-            });
+            checkA2dpDeviceConnection(deviceAddress, isConnected -> handleConnectionStatus(isConnected, currentStatus, strConnected, "A2DP", 1, latch));
 
-            checkLeAudioDeviceConnection(deviceAddress, isConnected -> {
-                handleConnectionStatus(isConnected, currentStatus, strConnected, "LE Audio", 2, latch);
-            });
+            checkLeAudioDeviceConnection(deviceAddress, isConnected -> handleConnectionStatus(isConnected, currentStatus, strConnected, "LE Audio", 2, latch));
 
             latch.await(); // 等待所有回调完成
 
@@ -1345,6 +1355,7 @@ public class BluetoothControlActivity extends Activity {
         runOnUiThread(() -> statusTextView.setText(status));
     }
 
+    @SuppressLint("NotifyDataSetChanged")
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -1357,21 +1368,23 @@ public class BluetoothControlActivity extends Activity {
 
                     String deviceInfo;
                     if (deviceName == null) {
-                        deviceInfo = "地址: " + deviceAddress; // Only display the address
+                        deviceInfo = "地址: " + deviceAddress;
                         if (!nfdeviceList.contains(deviceInfo)) {
+                            int insertPosition = nfdeviceList.size();
                             nfdeviceList.add(deviceInfo);
                             NFDevicesMap.put(deviceAddress, device);
-                            runOnUiThread(() -> nfdeviceListAdapter.notifyDataSetChanged());
+                            runOnUiThread(() -> nfdeviceListAdapter.notifyItemInserted(insertPosition));
                         }
                     } else {
                         deviceInfo = "名称: " + deviceName + "\n地址: " + deviceAddress;
                         BluetoothDevice connected_device = connectedDevicesMap.get(deviceAddress);
-                        if (!deviceList.contains(deviceInfo)){
+                        if (!nrdeviceList.contains(deviceInfo)) {
                             discoveredDevicesMap.put(deviceAddress, device);
                         }
-                        if (!deviceList.contains(deviceInfo) && !(Objects.equals(device, connected_device))) {
-                            deviceList.add(deviceInfo);
-                            runOnUiThread(() -> deviceListAdapter.notifyDataSetChanged());
+                        if (!nrdeviceList.contains(deviceInfo) && !(Objects.equals(device, connected_device))) {
+                            int insertPosition = nrdeviceList.size();
+                            nrdeviceList.add(deviceInfo);
+                            runOnUiThread(() -> nrdeviceListAdapter.notifyItemInserted(insertPosition));
                         }
                     }
                 }
@@ -1395,7 +1408,7 @@ public class BluetoothControlActivity extends Activity {
             auto_update = false;
             executorService.shutdown(); // 不接受新任务，但已提交的任务会继续执行
             try {
-                if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
+                if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
                     executorService.shutdownNow(); // 立即停止所有正在执行的任务
                 }
             } catch (InterruptedException e) {

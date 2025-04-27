@@ -71,7 +71,7 @@ public class MyAccessibilityService extends AccessibilityService {
                     PowerManager.PARTIAL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
                     "BTControl:AccessibilityWakeLock"
             );
-            wakeLock.acquire(15*60*1000L /*15 minutes*/);
+            wakeLock.acquire(10*60*1000L /*10 minutes*/);
             Log.d(TAG, "已获取 WakeLock：防止 CPU 休眠.");
         }
 

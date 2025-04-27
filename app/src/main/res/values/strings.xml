@@ -1,4 +1,11 @@
 <resources>
     <string name="app_name">BTControl</string>
     <string name="status">Status</string>
+    <string name="无障碍">无障碍</string>
+    <string name="已保存设备">已保存设备</string>
+    <string name="le_audio">LE Audio</string>
+    <string name="停止">停止</string>
+    <string name="非常用设备">非常用设备</string>
+    <string name="周围设备">周围设备</string>
+    <string name="等待">......</string>
 </resources>
