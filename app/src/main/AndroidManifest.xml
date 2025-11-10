@@ -9,16 +9,17 @@
     <uses-permission android:name="android.permission.BLUETOOTH"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
 
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"
-        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:required="true"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:required="true"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <!-- 注释掉未使用的蓝牙广播权限 -->
+    <!-- <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" /> -->
 
 
-    <!-- If your app needs background location access, declare this permission as well -->
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <!-- 后台位置权限 - 如果应用确实需要后台访问位置，请取消注释 -->
+    <!-- 注意：此权限需要用户特别批准，且必须先获得 ACCESS_FINE_LOCATION 权限 -->
+    <!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/> -->
+    <!-- 位置权限 - Android 12 及以上版本，蓝牙扫描仍然需要位置权限（除非使用 neverForLocation 标志） -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
-        android:maxSdkVersion="35"
         tools:ignore="CoarseFineLocation" />
 
     <!-- 系统特权权限（仅限系统应用） -->

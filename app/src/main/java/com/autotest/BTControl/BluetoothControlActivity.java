@@ -197,7 +197,7 @@ public class BluetoothControlActivity extends Activity {
             requestOverlayPermission();
         }
 
-        if (hasForegroundServicePermission()) {
+        if (!hasForegroundServicePermission()) {
             updateStatus("请求前台服务权限...");
             requestForegroundServicePermission();
         }
@@ -214,13 +214,19 @@ public class BluetoothControlActivity extends Activity {
 
     private boolean hasPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12 (API 31) 及以上版本需要新的蓝牙权限
             return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
                     ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
                     ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        } else {
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10 (API 29) 到 Android 11 (API 30)
             return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
                     ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED &&
                     ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        } else {
+            // Android 9 (API 28) 及以下版本
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED;
         }
     }
 
@@ -231,7 +237,7 @@ public class BluetoothControlActivity extends Activity {
 
     private boolean hasForegroundServicePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            return checkSelfPermission(Manifest.permission.FOREGROUND_SERVICE) != PackageManager.PERMISSION_GRANTED;
+            return checkSelfPermission(Manifest.permission.FOREGROUND_SERVICE) == PackageManager.PERMISSION_GRANTED;
         }
         return true; // 低版本系统默认允许
     }
@@ -246,18 +252,21 @@ public class BluetoothControlActivity extends Activity {
     @SuppressLint("InlinedApi")
     private String[] getRequiredPermissions(int sdkVersion) {
         if (sdkVersion >= Build.VERSION_CODES.S) {
+            // Android 12 (API 31) 及以上版本需要新的蓝牙权限
             return new String[]{
                     Manifest.permission.BLUETOOTH_SCAN,
                     Manifest.permission.BLUETOOTH_CONNECT,
                     Manifest.permission.ACCESS_FINE_LOCATION
             };
         } else if (sdkVersion >= Build.VERSION_CODES.Q) {
+            // Android 10 (API 29) 到 Android 11 (API 30)
             return new String[]{
                     Manifest.permission.BLUETOOTH,
                     Manifest.permission.BLUETOOTH_ADMIN,
                     Manifest.permission.ACCESS_FINE_LOCATION
             };
         } else {
+            // Android 9 (API 28) 及以下版本
             return new String[]{
                     Manifest.permission.BLUETOOTH,
                     Manifest.permission.BLUETOOTH_ADMIN
@@ -275,7 +284,7 @@ public class BluetoothControlActivity extends Activity {
 
     private void requestForegroundServicePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            if (hasForegroundServicePermission()) {
+            if (!hasForegroundServicePermission()) {
                 ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.FOREGROUND_SERVICE}, REQUEST_FOREGROUND_SERVICE);
             }
         }
@@ -298,12 +307,30 @@ public class BluetoothControlActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_BLUETOOTH_PERMISSIONS) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                updateStatus("权限授予成功，开始扫描...");
-                checkAndRequestPermissions();
+            boolean allGranted = true;
+            if (grantResults.length > 0) {
+                for (int result : grantResults) {
+                    if (result != PackageManager.PERMISSION_GRANTED) {
+                        allGranted = false;
+                        break;
+                    }
+                }
             } else {
-                updateStatus("权限未授予");
-                finish();
+                allGranted = false;
+            }
+            
+            if (allGranted) {
+                checkAndRequestPermissions();
+                updateStatus("蓝牙权限授予成功，开始扫描...");
+            } else {
+                updateStatus("蓝牙权限未授予，应用可能无法正常工作");
+                // 可以选择在这里显示一个对话框，解释为什么需要这些权限
+            }
+        } else if (requestCode == REQUEST_FOREGROUND_SERVICE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                updateStatus("前台服务权限已授予");
+            } else {
+                updateStatus("前台服务权限未授予，后台功能可能受限");
             }
         }
     }
@@ -766,6 +793,12 @@ public class BluetoothControlActivity extends Activity {
                 near_device = discoveredDevicesMap.get(targetDeviceAddress);
                 if (near_device != null) {
                     Log.d(TAG, "已发现设备: " + near_device.getName());
+                    try {
+                        Thread.sleep(5000);
+                    } catch (InterruptedException e) {
+                        Log.e(TAG, "线程被中断", e);
+                        Thread.currentThread().interrupt();
+                    }
                     auto_scan = false;
                     pairDevice(near_device);
 //                    auto_scan = true;
