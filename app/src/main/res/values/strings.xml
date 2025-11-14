@@ -4,8 +4,10 @@
     <string name="无障碍">无障碍</string>
     <string name="已保存设备">已保存设备</string>
     <string name="le_audio">LE Audio</string>
-    <string name="停止">停止</string>
+    <string name="停止扫描">停止扫描</string>
     <string name="非常用设备">非常用设备</string>
     <string name="周围设备">周围设备</string>
     <string name="等待">......</string>
+    <string name="搜索设备">搜索设备</string>
+    <string name="清除搜索">清除搜索</string>
 </resources>

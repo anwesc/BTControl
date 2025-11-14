@@ -2,303 +2,202 @@ package com.autotest.BTControl;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
-import android.app.Activity;
-import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothGatt;
-import android.bluetooth.BluetoothHeadset;
-import android.bluetooth.BluetoothLeAudio;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
-import android.bluetooth.BluetoothStatusCodes;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
+import android.provider.Settings;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
-import android.widget.CheckBox;
+import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-import android.provider.Settings;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import com.autotest.BTControl.adapters.BluetoothDeviceAdapter;
+import com.autotest.BTControl.utils.BluetoothOperationUtils;
+import com.autotest.BTControl.utils.BluetoothDiscoveryUtils;
+import com.autotest.BTControl.utils.ToastUtils;
+import com.autotest.BTControl.automation.BluetoothAutomationManager;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * 蓝牙控制活动类
+ * 主要功能：
+ * 1. 蓝牙设备的扫描、配对、连接和断开
+ * 2. 支持自动化执行蓝牙操作
+ * 3. 支持通过Intent传递参数进行自动化测试
+ */
+public class BluetoothControlActivity extends AppCompatActivity {
+    private static final String TAG = "BTControlActivity";
+    
+    // 请求码
+    private static final int REQUEST_BLUETOOTH_PERMISSIONS = 100;
+    private static final int REQUEST_BLUETOOTH_CONNECT_PERMISSIONS = 101;
+    private static final int REQUEST_BLUETOOTH_SCAN_PERMISSIONS = 102;
+    private static final int REQUEST_BLUETOOTH_ADMIN_PERMISSIONS = 103;
+    private static final int REQUEST_LOCATION_PERMISSIONS = 104;
+    private static final int REQUEST_SYSTEM_ALERT_WINDOW_PERMISSION = 105;
+    private static final int REQUEST_BACKGROUND_LOCATION_PERMISSIONS = 106;
 
-public class BluetoothControlActivity extends Activity {
-
-    // Constants
-    private static final int REQUEST_BLUETOOTH_PERMISSIONS = 1001;
-    private static final int REQUEST_OVERLAY_PERMISSION = 1002;
-    private static final int REQUEST_FOREGROUND_SERVICE = 1003;
-    private static final long AUTO_CONNECT_PERIOD = 60000;
-    private static final int AUTO_DISCOVERY_PERIOD = 1000;
-    private static final long MAX_DISCOVERY_DURATION = 5 * 60 * 1000; // 5分钟 = 300,000毫秒
-    private long discoveryStartTime = 0;
-    private final Handler discovery_handler = new Handler(Looper.getMainLooper());
-    // 添加 ExecutorService 作为成员变量
-    private ExecutorService executorService;
-
-    // UI Elements
+    // UI组件
+    private Button actionButton; // 布局中唯一的按钮，用于扫描/停止扫描
     private TextView statusTextView;
-    private CheckBox checkBox;
-    private ProgressBar progressBar;
-    private Button actionButton;
+    private ImageView imageAccessibilitySettings; // 无障碍设置按钮
+    private ProgressBar progressBar; // 扫描进度指示器
 
-    // Bluetooth-related
-    private BluetoothGatt bluetoothGatt;
+    private RecyclerView SavedDeviceRecyclerView;
+    private RecyclerView NRDeviceRecyclerView;
+    private RecyclerView NFDeviceRecyclerView;
+    
+    // 搜索相关UI组件
+    private EditText searchEditText;
+    private ImageButton clearSearchButton;
+    
+    // 蓝牙相关
     private BluetoothAdapter bluetoothAdapter;
-    private BluetoothLeAudio bluetoothLeAudio;
-    private String targetDeviceAddress;
-    private String targetDeviceName;
-    private String targetAction;
+    private BluetoothManager bluetoothManager;
 
-    // List Adapters
-    private BTDeviceAdapter nrdeviceListAdapter;
-    private BTDeviceAdapter connectedDeviceListAdapter;
-    private BTDeviceAdapter nfdeviceListAdapter;
+    
+    // 工具类实例
+    private BluetoothOperationUtils operationUtils;
+    private BluetoothAutomationManager automationManager;
 
-    // Device Lists
-    private final ArrayList<String> nrdeviceList = new ArrayList<>();
-    private final ArrayList<String> nfdeviceList = new ArrayList<>();
-    private final HashMap<String, BluetoothDevice> discoveredDevicesMap = new HashMap<>();
-    private final HashMap<String, BluetoothDevice> NFDevicesMap = new HashMap<>();
+    private BluetoothDiscoveryUtils discoveryUtils;
+    
+    // 设备列表和适配器
+    private final List<BluetoothDeviceAdapter.BluetoothDeviceItem> SavedDeviceList = new ArrayList<>();
+    private final List<BluetoothDeviceAdapter.BluetoothDeviceItem> NRDeviceList = new ArrayList<>();
+    private final List<BluetoothDeviceAdapter.BluetoothDeviceItem> NFDeviceList = new ArrayList<>();
+    
+    // 过滤后的设备列表
+    private final List<BluetoothDeviceAdapter.BluetoothDeviceItem> filteredSavedDeviceList = new ArrayList<>();
+    private final List<BluetoothDeviceAdapter.BluetoothDeviceItem> filteredNRDeviceList = new ArrayList<>();
+    private final List<BluetoothDeviceAdapter.BluetoothDeviceItem> filteredNFDeviceList = new ArrayList<>();
+    
+    // 搜索状态
+    private boolean isSearching = false;
+    
+    // 设备映射 - 只保留与三个列表对应的映射
+    private final Map<String, BluetoothDevice> SavedDevicesMap = new HashMap<>();
+    private final Map<String, BluetoothDevice> NRDevicesMap = new HashMap<>();
+    private final Map<String, BluetoothDevice> NFDevicesMap = new HashMap<>();
 
-    private final ArrayList<String> connectedDeviceList = new ArrayList<>();
-    private final HashMap<String, BluetoothDevice> connectedDevicesMap = new HashMap<>();
+    // 适配器
+    private BluetoothDeviceAdapter SavedDeviceListAdapter;
+    private BluetoothDeviceAdapter NRDeviceListAdapter;
+    private BluetoothDeviceAdapter NFDeviceListAdapter;
 
-    // Bluetooth Helper
-    private final BluetoothDevHelper DevHelper = new BluetoothDevHelper(this);
+    private final AtomicBoolean autoAction = new AtomicBoolean(false);
+    private final AtomicBoolean autoScan = new AtomicBoolean(false);
+    private final AtomicBoolean isScanning = new AtomicBoolean(false); // 扫描状态
 
-    public static boolean auto_action = true;
-    public static boolean auto_update = true;
-    public static boolean auto_scan = true;
-    public static boolean first_get_CtdDev_finish = false;
-    private boolean isEventProcessing = false;
-    private long lastClickTime = 0;
-    private static final long CLICK_DELAY = 1234; // 1秒
-    private static int CountDownLatch_time = 4;
-    private static final String TAG = "BTControl";
-    UUID LE_AUDIO_SERVICE_UUID = UUID.fromString("0000184E-0000-1000-8000-00805F9B34FB");
-    UUID LE_AUDIO_CHARACTERISTIC_UUID = UUID.fromString("00002BC4-0000-1000-8000-00805f9b34fb");
+    // 线程管理
+    private ExecutorService executorService;
+    private ScheduledExecutorService scheduledExecutorService;
+
+    // ==================== 生命周期方法 ====================
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_bluetooth_connection);
+        setContentView(R.layout.activity_bluetooth_control);
+        
+        initializeComponents();
 
-        if (executorService == null) {
-            // 如果 executorService 为 null，可能需要重新初始化
-            executorService = Executors.newFixedThreadPool(5);
+        // 检查蓝牙权限
+        if (!hasBluetoothPermissions()) {
+            requestBluetoothPermissions();
+        }
+        // 在蓝牙权限授予后，再检查并请求后台位置权限
+        if (!hasBackgroundLocationPermission()) {
+            requestBackgroundLocationPermission();
         }
 
-        initializeUI();
-        initializeBluetooth();
-        checkAndRequestPermissions();
-        setupListViewListeners();
-        setupActionButtonListener();
-    }
-
-    private void initializeUI() {
-        statusTextView = findViewById(R.id.statusTextView);
-        progressBar = findViewById(R.id.progressBar);
-        RecyclerView NRDeviceRecyclerView = findViewById(R.id.NRDeviceRecyclerView);
-        RecyclerView NFDeviceRecyclerView = findViewById(R.id.NFDeviceRecyclerView);
-        RecyclerView connectedDeviceRecyclerView = findViewById(R.id.connectedDeviceRecyclerView);
-        actionButton = findViewById(R.id.actionButton);
-        checkBox = findViewById(R.id.checkBox);
-
-        nrdeviceListAdapter = new BTDeviceAdapter(nrdeviceList, position -> {
-            // 这里写点击后的操作，比如：
-            String deviceInfo = nrdeviceList.get(position);
-            updateStatus("你点击了 常用设备: " + deviceInfo);
-        });
-
-        connectedDeviceListAdapter = new BTDeviceAdapter(connectedDeviceList, position -> {
-            // 这里写点击后的操作，比如：
-            String deviceInfo = connectedDeviceList.get(position);
-            updateStatus("你点击了 已连接设备: " + deviceInfo);
-        });
-
-        NRDeviceRecyclerView.setAdapter(nrdeviceListAdapter);
-        NRDeviceRecyclerView.setLayoutManager(new LinearLayoutManager(this)); // 一定要设置 LayoutManager
-        connectedDeviceRecyclerView.setAdapter(connectedDeviceListAdapter);
-        connectedDeviceRecyclerView.setLayoutManager(new LinearLayoutManager(this)); // 一定要设置 LayoutManager
-
-        nfdeviceListAdapter = new BTDeviceAdapter(nfdeviceList, position -> {
-            // 这里写点击后的操作，比如：
-            String deviceInfo = nfdeviceList.get(position);
-            updateStatus("你点击了 非常用设备: " + deviceInfo);
-        });
-        NFDeviceRecyclerView.setAdapter(nfdeviceListAdapter);
-        NFDeviceRecyclerView.setLayoutManager(new LinearLayoutManager(this)); // 一定要设置 LayoutManager
-    }
-
-    private void initializeBluetooth() {
-        BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-        bluetoothAdapter = bluetoothManager.getAdapter();
-
-        targetDeviceAddress = getIntent().getStringExtra("bluetooth_address");
-        if (targetDeviceAddress != null) {
-            Log.d(TAG, "param: " + targetDeviceAddress);
-        }
-        targetDeviceName = getIntent().getStringExtra("bluetooth_name");
-        if (targetDeviceName != null) {
-            Log.d(TAG, "param: " + targetDeviceName);
-        }
-        targetAction = getIntent().getStringExtra("auto_action");
-        if (targetAction != null) {
-            Log.d(TAG, "param: " + targetAction);
-            auto_action = true;
-        }
-    }
-
-    private void checkAndRequestPermissions() {
-        if (isEventProcessing) return;
-        isEventProcessing = true;
-
-        // 检查和请求权限
-        if (!hasPermissions()) {
-            updateStatus("请求蓝牙权限中...");
-            requestPermissions();
+        // 检查并请求悬浮窗权限
+        if (!hasSystemAlertWindowPermission()) {
+            requestSystemAlertWindowPermission();
         }
 
-        if (!hasOverlayPermission()) {
-            updateStatus("请求‘显示在其他应用上层’权限...");
-            requestOverlayPermission();
-        }
+        setupUI();
 
-        if (!hasForegroundServicePermission()) {
-            updateStatus("请求前台服务权限...");
-            requestForegroundServicePermission();
-        }
+        if (hasBluetoothPermissions()){
+            initializeBluetooth();
+            setupEventListeners();
+            startDeviceMonitoring();
+            startBluetoothDiscovery();
+            processIntentParameters();
+            
 
-        isEventProcessing = false;
-        if (isLeAudioSupported()) {
-            CountDownLatch_time = 6;
-//                runOnUiThread(() -> checkBox.setVisibility(View.VISIBLE));
-//                checkBox.setChecked(true);
-//                boolean checked = checkBox.isChecked();
-        }
-        startBluetoothDiscovery();
-    }
-
-    private boolean hasPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12 (API 31) 及以上版本需要新的蓝牙权限
-            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10 (API 29) 到 Android 11 (API 30)
-            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED &&
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        } else {
-            // Android 9 (API 28) 及以下版本
-            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED;
-        }
-    }
-
-    @SuppressLint("ObsoleteSdkInt")
-    private boolean hasOverlayPermission() {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this);
-    }
-
-    private boolean hasForegroundServicePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            return checkSelfPermission(Manifest.permission.FOREGROUND_SERVICE) == PackageManager.PERMISSION_GRANTED;
-        }
-        return true; // 低版本系统默认允许
-    }
-
-    private void requestPermissions() {
-        int sdkVersion = Build.VERSION.SDK_INT;
-        String[] permissions = getRequiredPermissions(sdkVersion);
-
-        ActivityCompat.requestPermissions(this, permissions, REQUEST_BLUETOOTH_PERMISSIONS);
-    }
-
-    @SuppressLint("InlinedApi")
-    private String[] getRequiredPermissions(int sdkVersion) {
-        if (sdkVersion >= Build.VERSION_CODES.S) {
-            // Android 12 (API 31) 及以上版本需要新的蓝牙权限
-            return new String[]{
-                    Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_CONNECT,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-            };
-        } else if (sdkVersion >= Build.VERSION_CODES.Q) {
-            // Android 10 (API 29) 到 Android 11 (API 30)
-            return new String[]{
-                    Manifest.permission.BLUETOOTH,
-                    Manifest.permission.BLUETOOTH_ADMIN,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-            };
-        } else {
-            // Android 9 (API 28) 及以下版本
-            return new String[]{
-                    Manifest.permission.BLUETOOTH,
-                    Manifest.permission.BLUETOOTH_ADMIN
-            };
-        }
-    }
-
-
-    private void requestOverlayPermission() {
-        if (!hasOverlayPermission()) {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-            startActivityForResult(intent, REQUEST_OVERLAY_PERMISSION);
-        }
-    }
-
-    private void requestForegroundServicePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            if (!hasForegroundServicePermission()) {
-                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.FOREGROUND_SERVICE}, REQUEST_FOREGROUND_SERVICE);
-            }
         }
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        // 使用工具类注册蓝牙广播接收器
+        if (discoveryUtils != null) {
+            discoveryUtils.registerBluetoothReceiver();
+        }
+
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        
+        // 使用工具类注销蓝牙广播接收器
+        if (discoveryUtils != null) {
+            discoveryUtils.unregisterBluetoothReceiver();
+        }
+        
+        // 使用工具类停止设备扫描
+        if (discoveryUtils != null) {
+            discoveryUtils.stopDiscovery();
+        }
+    }
+
+    @SuppressLint("ObsoleteSdkInt")
+    @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_OVERLAY_PERMISSION) {
-            if (hasOverlayPermission()) {
-                updateStatus("‘显示在其他应用上层’权限已授予");
-            } else {
-                updateStatus("‘显示在其他应用上层’权限未授予");
-                finish();
+        
+        if (requestCode == REQUEST_SYSTEM_ALERT_WINDOW_PERMISSION) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (Settings.canDrawOverlays(this)) {
+                    updateStatus("悬浮窗权限已授予");
+                } else {
+                    updateStatus("悬浮窗权限未授予，部分功能可能无法使用");
+                }
             }
         }
     }
@@ -306,1177 +205,1482 @@ public class BluetoothControlActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        
         if (requestCode == REQUEST_BLUETOOTH_PERMISSIONS) {
             boolean allGranted = true;
-            if (grantResults.length > 0) {
-                for (int result : grantResults) {
-                    if (result != PackageManager.PERMISSION_GRANTED) {
-                        allGranted = false;
-                        break;
-                    }
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
+                    allGranted = false;
+                    break;
                 }
-            } else {
-                allGranted = false;
             }
             
             if (allGranted) {
-                checkAndRequestPermissions();
-                updateStatus("蓝牙权限授予成功，开始扫描...");
+                updateStatus("蓝牙权限已授予");
+                initializeBluetooth();
+                setupEventListeners();
+                startDeviceMonitoring();
+                startBluetoothDiscovery();
             } else {
-                updateStatus("蓝牙权限未授予，应用可能无法正常工作");
-                // 可以选择在这里显示一个对话框，解释为什么需要这些权限
+                updateStatus("蓝牙权限未授予，部分功能可能无法使用");
             }
-        } else if (requestCode == REQUEST_FOREGROUND_SERVICE) {
+        } else if (requestCode == REQUEST_BACKGROUND_LOCATION_PERMISSIONS) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                updateStatus("前台服务权限已授予");
+                updateStatus("后台位置权限已授予");
             } else {
-                updateStatus("前台服务权限未授予，后台功能可能受限");
+                updateStatus("后台位置权限未授予");
             }
         }
     }
 
-    @SuppressLint("MissingPermission")
-    private void setupListViewListeners() {
-        nrdeviceListAdapter.setOnItemClickListener(position -> {
-            if (isEventProcessing) {
-                return;
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        
+        Log.d(TAG, "正在关闭应用");
+        
+        // 停止自动化操作
+        stopAutomation();
+        
+        // 关闭线程池
+        if (executorService != null && !executorService.isShutdown()) {
+            executorService.shutdownNow();
+        }
+        
+        if (scheduledExecutorService != null && !scheduledExecutorService.isShutdown()) {
+            scheduledExecutorService.shutdownNow();
+        }
+        
+        // 释放工具类资源
+        if (automationManager != null) {
+            automationManager.stopAutoAction();
+        }
+
+        if (discoveryUtils != null) {
+            discoveryUtils.cleanup();
+        }
+        
+        // 取消所有Toast消息
+        ToastUtils.cancelCurrentToast();
+    }
+
+    // ==================== 初始化方法 ====================
+
+    /**
+     * 初始化组件
+     */
+    private void initializeComponents() {
+        executorService = Executors.newCachedThreadPool();
+        scheduledExecutorService = Executors.newScheduledThreadPool(2);
+        
+        // 初始化工具类
+        operationUtils = new BluetoothOperationUtils(this, executorService, new BluetoothOperationUtils.UIUpdateCallback() {
+            @Override
+            public void updateStatus(String status) {
+                BluetoothControlActivity.this.updateStatus(status);
             }
-            isEventProcessing = true;
-            auto_scan = false;
-            try {
-                String deviceInfo = nrdeviceList.get(position);
-                BluetoothDevice device = discoveredDevicesMap.get(getDeviceAddress(deviceInfo));
-                if (device != null) {
-                    updateStatus("正在连接设备: " + device.getName() + " [" + device.getAddress() + "]");
-                    pairDevice(device);
-                } else {
-                    updateStatus("设备信息未找到");
-                }
-            } catch (Exception e) {
-                updateStatus("错误信息: " + e);
-            } finally {
-                isEventProcessing = false;
+            
+            @Override
+            public void runOnUiThread(Runnable action) {
+                BluetoothControlActivity.this.runOnUiThread(action);
             }
         });
+        automationManager = new BluetoothAutomationManager(
+                this,
+                operationUtils,
+                executorService, 
+                scheduledExecutorService,
+                SavedDevicesMap,
+                NRDevicesMap,
+                NFDevicesMap
+        );
+        discoveryUtils = new BluetoothDiscoveryUtils(this);
 
-        connectedDeviceListAdapter.setOnItemClickListener(position -> {
-            if (System.currentTimeMillis() - lastClickTime < CLICK_DELAY) {
-                return;
+    }
+
+    /**
+     * 初始化蓝牙
+     */
+    private void initializeBluetooth() {
+        Log.d(TAG, "开始初始化蓝牙");
+        bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        if (bluetoothManager != null) {
+            Log.d(TAG, "BluetoothManager获取成功");
+            bluetoothAdapter = bluetoothManager.getAdapter();
+            if (bluetoothAdapter != null) {
+                Log.d(TAG, "BluetoothAdapter获取成功，是否启用: " + bluetoothAdapter.isEnabled());
+            } else {
+                Log.e(TAG, "BluetoothAdapter获取失败，设备不支持蓝牙");
             }
-            lastClickTime = System.currentTimeMillis();
-            if (isEventProcessing) {
-                return;
-            }
-            isEventProcessing = true;
-            auto_scan = false;
-            try {
-                if (position >= 0 && position < connectedDeviceList.size()) {
-                    String deviceInfo = connectedDeviceList.get(position);
-                    BluetoothDevice device = connectedDevicesMap.get(getDeviceAddress(deviceInfo));
-                    if (device != null) {
-                        if (deviceInfo.contains("状态:") && deviceInfo.contains("已连接")) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && deviceInfo.contains("LE Audio")) {
-                                Log.d("BluetoothProfile", "这是一个LE Audio设备");
-                                Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
-                                startActivity(intent);
-                                Toast.makeText(this, "LE Audio设备请在蓝牙设置页面控制", Toast.LENGTH_SHORT).show();
-                            } else {
-                                disconnectDevice(device);
-                            }
+        } else {
+            Log.e(TAG, "BluetoothManager获取失败");
+        }
+    }
+
+    /**
+     * 设置UI
+     */
+    private void setupUI() {
+        // 布局中只有一个Button，ID为actionButton
+        actionButton = findViewById(R.id.actionButton);
+        statusTextView = findViewById(R.id.statusTextView);
+        
+        // 初始化无障碍设置按钮
+        imageAccessibilitySettings = findViewById(R.id.image_accessibility_settings);
+        
+        // 初始化进度条
+        progressBar = findViewById(R.id.progressBar);
+        
+        // 初始化搜索相关UI组件
+        searchEditText = findViewById(R.id.searchEditText);
+        clearSearchButton = findViewById(R.id.clearSearchButton);
+        
+        // 初始化RecyclerView
+        SavedDeviceRecyclerView = findViewById(R.id.SavedDeviceRecyclerView);
+        NRDeviceRecyclerView = findViewById(R.id.NRDeviceRecyclerView);
+        NFDeviceRecyclerView = findViewById(R.id.NFDeviceRecyclerView);
+        
+        // 设置RecyclerView
+        setupRecyclerViews();
+        
+        // 设置搜索功能
+        setupSearchFunctionality();
+    }
+
+    /**
+     * 设置事件监听器
+     */
+    private void setupEventListeners() {
+        // 使用布局中唯一的actionButton，设置为扫描功能
+        if (actionButton != null) {
+            actionButton.setOnClickListener(v -> {
+                if (isScanning.get()) {
+                    stopBluetoothDiscovery();
+                } else {
+                    // 点击"开始扫描"按钮仅扫描一次
+                    startBluetoothDiscovery(false);
+                }
+            });
+        }
+        
+        // 设置无障碍设置按钮点击事件
+        if (imageAccessibilitySettings != null) {
+            imageAccessibilitySettings.setOnClickListener(v -> {
+                // 检查无障碍服务是否已启用
+                if (!isAccessibilityServiceEnabled()) {
+                    // 跳转到无障碍设置页面
+                    Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                    startActivity(intent);
+                    ToastUtils.showLong(this, "请开启BTControl无障碍功能");
+                } else {
+                    ToastUtils.showShort(this, "BTControl无障碍功能已开启");
+                }
+            });
+        }
+    }
+
+    /**
+     * 设置RecyclerView
+     */
+    private void setupRecyclerViews() {
+        
+        // 已连接设备列表
+        SavedDeviceListAdapter = createBluetoothDeviceAdapter(SavedDeviceList,
+            (position, deviceItem) -> {
+                BluetoothDevice device = deviceItem.getBluetoothDevice();
+                if (device != null) {
+                    if (deviceItem.isConnected()) {
+                        disconnectDevice(device);
+                    } else {
+                        connectToDevice(device);
+                    }
+                }
+            },
+            (position, deviceItem) -> {
+                BluetoothDevice device = deviceItem.getBluetoothDevice();
+                if (device != null) {
+                    unpairDevice(device);
+                }
+            });
+        
+        // NR设备列表（周围设备）
+        NRDeviceListAdapter = createBluetoothDeviceAdapter(NRDeviceList,
+            (position, deviceItem) -> {
+                BluetoothDevice device = deviceItem.getBluetoothDevice();
+                if (device != null) {
+                    pairDevice(device);
+                }
+            },
+            null); // 长按不处理
+        
+        // NF设备列表（非常用设备）
+        NFDeviceListAdapter = createBluetoothDeviceAdapter(NFDeviceList,
+            (position, deviceItem) -> {
+                BluetoothDevice device = deviceItem.getBluetoothDevice();
+                if (device != null) {
+                    if (deviceItem.isPaired()) {
+                        if (deviceItem.isConnected()) {
+                            disconnectDevice(device);
                         } else {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkBox.isChecked()) {
-                                Log.d("BluetoothProfile", "这是一个LE Audio设备");
-                                Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
-                                startActivity(intent);
-                                Toast.makeText(this, "LE Audio设备请在蓝牙设置页面控制", Toast.LENGTH_SHORT).show();
-                            } else {
-                                connectToDevice(device);
-                            }
+                            connectToDevice(device);
                         }
                     } else {
-                        updateStatus("设备信息未找到");
+                        pairDevice(device);
                     }
-                } else {
-                    updateStatus("位置无效");
                 }
-            } catch (Exception e) {
-                updateStatus("错误信息: " + e);
-            } finally {
-                isEventProcessing = false;
-            }
-        });
-
-        // 长按断开配对
-        connectedDeviceListAdapter.setOnItemLongClickListener(position -> {
-            if (isEventProcessing) {
-                return ;
-            }
-            isEventProcessing = true;
-            auto_scan = false;
-            try {
-                if (position >= 0 && position < connectedDeviceList.size()) {
-                    String deviceInfo = connectedDeviceList.get(position);
-                    BluetoothDevice device = connectedDevicesMap.get(getDeviceAddress(deviceInfo));
-                    if (device != null) {
-                        unpairDevice(device);
-                    } else {
-                        updateStatus("设备信息未找到");
-                    }
-                } else {
-                    updateStatus("位置无效");
+            },
+            (position, deviceItem) -> {
+                BluetoothDevice device = deviceItem.getBluetoothDevice();
+                if (device != null) {
+                    unpairDevice(device);
                 }
-            } catch (Exception e) {
-                updateStatus("错误信息: " + e);
-            } finally {
-                isEventProcessing = false;
-            }
-        });
-    }
-
-
-    private String getDeviceAddress(String deviceInfo) {
-        try {
-            return deviceInfo.split("\n地址: ")[1].split("\n")[0];
-        } catch (ArrayIndexOutOfBoundsException e) {
-            Log.e(TAG, "error: " + e);
-            return ""; // Return an empty string if parsing fails
+            });
+        
+        // 设置RecyclerView
+        setupRecyclerView(SavedDeviceRecyclerView, SavedDeviceListAdapter);
+        setupRecyclerView(NRDeviceRecyclerView, NRDeviceListAdapter);
+        setupRecyclerView(NFDeviceRecyclerView, NFDeviceListAdapter);
+        
+        // 初始调整NRDeviceRecyclerView的高度
+        if (NRDeviceRecyclerView != null) {
+            adjustNRDeviceRecyclerViewHeight();
         }
     }
-
-
-    @SuppressLint("MissingPermission")
-    private void setupActionButtonListener() {
-        ImageView imageAccessibilitySettings = findViewById(R.id.image_accessibility_settings);
-        imageAccessibilitySettings.setOnClickListener(v -> startAccessibilityService());
-        actionButton.setOnClickListener(v -> {
-            if (hasPermissions()) {
-                registerReceiver(receiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
-            } else {
-                updateStatus("BLUETOOTH_SCAN 权限未授予");
-            }
-            if (bluetoothAdapter.isDiscovering()) {
-                stopDiscovery_click();
-            } else {
-                resetDeviceLists();
-                startDiscovery_click();
-            }
-        });
+    
+    /**
+     * 创建蓝牙设备适配器的通用方法
+     */
+    private BluetoothDeviceAdapter createBluetoothDeviceAdapter(
+            List<BluetoothDeviceAdapter.BluetoothDeviceItem> deviceList,
+            BluetoothDeviceAdapter.DeviceClickListener clickListener,
+            BluetoothDeviceAdapter.DeviceLongClickListener longClickListener) {
+        
+        // 创建默认的监听器
+        BluetoothDeviceAdapter.DeviceClickListener defaultClickListener = clickListener != null ? 
+            clickListener :
+                (position, deviceItem) -> {
+                    // 默认不处理点击事件
+                };
+            
+        BluetoothDeviceAdapter.DeviceLongClickListener defaultLongClickListener = longClickListener != null ? 
+            longClickListener :
+                (position, deviceItem) -> {
+                    // 默认不处理长按事件
+                };
+        
+        return new BluetoothDeviceAdapter(deviceList, defaultClickListener, defaultLongClickListener);
     }
-
-    private final Runnable discoveryRunnable = new Runnable() {
-        @SuppressLint("MissingPermission")
-        @Override
-        public void run() {
-            if (auto_scan) {
-                long elapsed = System.currentTimeMillis() - discoveryStartTime;
-                if (elapsed < MAX_DISCOVERY_DURATION) {
-                    bluetoothAdapter.startDiscovery();
-                    discovery_handler.postDelayed(this, AUTO_DISCOVERY_PERIOD); // Schedule next scan
-                } else {
-                    auto_scan = false; // 超过5分钟，停止扫描
-                    bluetoothAdapter.cancelDiscovery();
-                }
-            }
+    
+    /**
+     * 设置RecyclerView的通用方法
+     */
+    private void setupRecyclerView(RecyclerView recyclerView, BluetoothDeviceAdapter adapter) {
+        if (recyclerView != null) {
+            recyclerView.setLayoutManager(new LinearLayoutManager(this));
+            recyclerView.setAdapter(adapter);
         }
-    };
-
-    // 定义一个回调接口
-    public interface ConnectionCallback {
-        void onConnectionChecked(boolean isConnected);
     }
-
-
-    // 通用的 BluetoothProfile 连接检查函数
-    private void checkDeviceConnection(int profileType, String deviceAddress, ConnectionCallback callback) {
-
-        bluetoothAdapter.getProfileProxy(this, new BluetoothProfile.ServiceListener() {
-            boolean current_isConnected;
+    
+    /**
+     * 设置搜索功能
+     */
+    private void setupSearchFunctionality() {
+        if (searchEditText == null || clearSearchButton == null) {
+            return;
+        }
+        
+        // 设置搜索文本监听器
+        searchEditText.addTextChangedListener(new TextWatcher() {
             @Override
-            public void onServiceConnected(int profile, BluetoothProfile proxy) {
-                if (profile == profileType) {
-                    boolean isConnected = false;
-
-                    switch (profileType) {
-                        case BluetoothProfile.A2DP:
-                            BluetoothA2dp a2dp = (BluetoothA2dp) proxy;
-                            isConnected = DevHelper.isDeviceConnected(a2dp, deviceAddress, BluetoothProfile.A2DP);
-                            break;
-
-                        case BluetoothProfile.HEADSET:
-                            BluetoothHeadset headset = (BluetoothHeadset) proxy;
-                            isConnected = DevHelper.isDeviceConnected(headset, deviceAddress, BluetoothProfile.HEADSET);
-                            break;
-
-                        case BluetoothProfile.LE_AUDIO:
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                                BluetoothLeAudio leAudio = (BluetoothLeAudio) proxy;
-                                isConnected = DevHelper.isDeviceConnected(leAudio, deviceAddress, BluetoothProfile.LE_AUDIO);
-                            } else {
-                                Log.w("DeviceConnection", "LE Audio 不受支持的 Android 版本");
-                            }
-                            break;
-
-                        default:
-                            Log.w("DeviceConnection", "未知的 BluetoothProfile 类型");
-                            break;
-                    }
-
-                    Log.d("DeviceConnection", "设备连接状态: " + isConnected + " (Profile: " + profileType + ")");
-                    current_isConnected = isConnected;
-                    callback.onConnectionChecked(isConnected);
-                    bluetoothAdapter.closeProfileProxy(profileType, proxy); // 释放资源
-                }
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                // 不需要处理
             }
-
+            
             @Override
-            public void onServiceDisconnected(int profile) {
-                if (profile == profileType) {
-                    callback.onConnectionChecked(current_isConnected); // 当服务断开时，回调返回未连接状态
-                    bluetoothAdapter.closeProfileProxy(profileType, null); // 确保断开时资源被释放
-                }
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                // 当文本变化时执行扫描
+                String query = s.toString().trim();
+                isSearching = !query.isEmpty();
+                
+                // 显示或隐藏清除按钮
+                clearSearchButton.setVisibility(isSearching ? View.VISIBLE : View.GONE);
+                
+                // 执行扫描
+                filterDevices(query);
             }
-        }, profileType);
-    }
-
-
-    // 检查 A2DP 设备是否连接
-    public void checkA2dpDeviceConnection(String deviceAddress, ConnectionCallback callback) {
-        checkDeviceConnection(BluetoothProfile.A2DP, deviceAddress, callback);
-    }
-
-    // 检查 HFP 设备是否连接
-    public void checkHfpDeviceConnection(String deviceAddress, ConnectionCallback callback) {
-        checkDeviceConnection(BluetoothProfile.HEADSET, deviceAddress, callback);
-    }
-
-    // 检查 LE Audio 设备是否连接
-    public void checkLeAudioDeviceConnection(String deviceAddress, ConnectionCallback callback) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            checkDeviceConnection(BluetoothProfile.LE_AUDIO, deviceAddress, callback);
-        } else {
-            Log.w("DeviceConnection", "LE Audio 不受支持的 Android 版本");
-            callback.onConnectionChecked(false); // LE Audio 不支持时返回未连接状态
-        }
-    }
-
-
-    private boolean isLeAudioSupported() {
-        BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (bluetoothAdapter != null && bluetoothAdapter.isLeAudioSupported() != BluetoothStatusCodes.FEATURE_NOT_SUPPORTED ) {
-                Log.d(TAG, "设备支持 LE Audio");
+            
+            @Override
+            public void afterTextChanged(Editable s) {
+                // 不需要处理
+            }
+        });
+        
+        // 设置清除按钮点击事件
+        clearSearchButton.setOnClickListener(v -> {
+            searchEditText.setText("");
+            clearSearchButton.setVisibility(View.GONE);
+            isSearching = false;
+            filterDevices("");
+        });
+        
+        // 设置搜索键盘的扫描按钮
+        searchEditText.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                // 隐藏键盘
+                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                imm.hideSoftInputFromWindow(searchEditText.getWindowToken(), 0);
                 return true;
-            } else {
-                Log.d(TAG, "设备不支持 LE Audio");
-                return false;
             }
+            return false;
+        });
+    }
+
+    // ==================== 设备状态监控 ====================
+
+    /**
+     * 启动设备监控
+     */
+    private void startDeviceMonitoring() {
+        // 首先执行一次updateSavedDeviceList，完成后才开始定期监控
+        updateSavedDeviceListWithCallback(() -> {
+            Log.d(TAG, "首次updateSavedDeviceList完成，开始定期监控");
+            
+            // 启动定期检查设备连接状态的任务
+            scheduledExecutorService.scheduleWithFixedDelay(this::updateSavedDeviceList,
+                    0, 1, TimeUnit.SECONDS); // 从1秒后开始，每1秒执行一次
+        });
+    }
+
+    // ==================== 权限相关方法 ====================
+
+    /**
+     * 检查悬浮窗权限
+     */
+    @SuppressLint("ObsoleteSdkInt")
+    private boolean hasSystemAlertWindowPermission() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || 
+               Settings.canDrawOverlays(this);
+    }
+
+    /**
+     * 请求悬浮窗权限
+     */
+    @SuppressLint("ObsoleteSdkInt")
+    private void requestSystemAlertWindowPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+            intent.setData(android.net.Uri.parse("package:" + getPackageName()));
+            startActivityForResult(intent, REQUEST_SYSTEM_ALERT_WINDOW_PERMISSION);
+        }
+    }
+
+    /**
+     * 检查蓝牙权限
+     */
+    private boolean hasBluetoothPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                   ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                   ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
+                   ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED &&
+                   ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        } else {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
+                   ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED;
+        }
+    }
+
+    /**
+     * 检查后台位置权限
+     */
+    @SuppressLint("InlinedApi")
+    private boolean hasBackgroundLocationPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /**
+     * 请求蓝牙权限
+     */
+    private void requestBluetoothPermissions() {
+        List<String> permissions = new ArrayList<>();
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN);
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        } else {
+            permissions.add(Manifest.permission.BLUETOOTH);
+            permissions.add(Manifest.permission.BLUETOOTH_ADMIN);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+            }
+        }
+        
+        ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), REQUEST_BLUETOOTH_PERMISSIONS);
+    }
+
+    /**
+     * 请求后台位置权限
+     */
+    private void requestBackgroundLocationPermission() {
+        // 先检查是否已有前台位置权限
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            // 如果没有前台位置权限，先请求前台位置权限
+            requestBluetoothPermissions();
+        }
+        
+        // 显示说明对话框，解释为什么需要后台位置权限
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("需要后台位置权限")
+            .setMessage("为了在后台持续扫描和监控蓝牙设备，应用需要后台位置权限。此权限仅在应用在后台运行时使用，不会在您不使用应用时收集位置信息。")
+            .setPositiveButton("授予权限", (dialog, which) -> {
+                // 请求后台位置权限
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ActivityCompat.requestPermissions(
+                        this, 
+                        new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, 
+                        REQUEST_BACKGROUND_LOCATION_PERMISSIONS
+                    );
+                } else {
+                    // 低于Android 10的版本不需要此权限
+                    updateStatus("当前系统版本不需要后台位置权限");
+                }
+            })
+            .setNegativeButton("取消", (dialog, which) -> updateStatus("后台位置权限未授予，应用在后台时可能无法正常扫描蓝牙设备"))
+            .show();
+    }
+
+    /**
+     * 检查无障碍服务是否已启用
+     */
+    private boolean isAccessibilityServiceEnabled() {
+        String serviceId = getPackageName() + "/.automation.BTControlAccessibilityService";
+        try {
+            int accessibilityEnabled = Settings.Secure.getInt(
+                getContentResolver(),
+                Settings.Secure.ACCESSIBILITY_ENABLED
+            );
+            
+            if (accessibilityEnabled == 1) {
+                // 检查特定服务是否启用
+                String enabledServices = Settings.Secure.getString(
+                    getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                );
+                return enabledServices != null && enabledServices.contains(serviceId);
+            }
+        } catch (Settings.SettingNotFoundException e) {
+            Log.e(TAG, "无法检查无障碍服务状态", e);
         }
         return false;
     }
 
+    // ==================== 自动化操作方法 ====================
+
+    /**
+     * 处理Intent参数
+     */
     @SuppressLint("MissingPermission")
-    private void startBluetoothDiscovery() {
-        if (hasPermissions()) {
+    private void processIntentParameters() {
+        Intent intent = getIntent();
+        Log.d(TAG, "自动化: 开始处理Intent参数");
 
-            resetDeviceLists();
-            registerReceiver(receiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
-            first_get_CtdDev_finish = false;
-            auto_update = true;
-            bluetoothAdapter.startDiscovery();
-            auto_scan = true;
-            discoveryStartTime = System.currentTimeMillis();
-            discovery_handler.post(discoveryRunnable);
+        if (intent != null) {
+            // 打印所有Extras
+            Bundle extras = intent.getExtras();
+            if (extras != null) {
+                Log.d(TAG, "自动化: Intent包含以下Extras:");
+                for (String key : extras.keySet()) {
+                    Object value = extras.get(key);
+                    Log.d(TAG, "自动化: Key=" + key + ", Value=" + value);
+                }
+            } else {
+                Log.d(TAG, "自动化: Intent没有Extras");
+            }
 
-            startAutoThread();
+            // 自动化执行相关
+            String targetAction = intent.getStringExtra("auto_action");
+            Log.d(TAG, "自动化: targetAction=" + targetAction);
+
+            // 支持两种参数名：device_address 和 bluetooth_address
+            String targetDeviceAddress = intent.getStringExtra("device_address");
+            if (targetDeviceAddress == null) {
+                targetDeviceAddress = intent.getStringExtra("bluetooth_address");
+            }
+
+            if (targetAction != null && targetDeviceAddress != null) {
+                String successMsg = "正在执行自动化操作请求: " + targetAction + ", 设备地址: " + targetDeviceAddress;
+                showSuccessMessage(successMsg);
+                autoAction.set(true);
+
+                // 设置状态监听器
+                automationManager.setStatusListener(new BluetoothAutomationManager.AutomationStatusListener() {
+
+                    @Override
+                    public void onOperationComplete(String action, boolean success, String message) {
+                        runOnUiThread(() -> {
+                            if (success) {
+                                updateStatus("自动化操作完成: " + action);
+                            } else {
+                                updateStatus("自动化操作失败: " + action + " - " + message);
+                            }
+                            autoAction.set(false);
+                        });
+                    }
+
+                    @Override
+                    public void onDeviceDiscovered(BluetoothDevice device) {
+                        runOnUiThread(() -> updateStatus("自动化发现设备: " + device.getName()));
+                    }
+                });
+
+                // 执行自动化操作
+                automationManager.executeAutoAction(targetAction, targetDeviceAddress);
+            } else {
+                Log.d(TAG, "自动化: 参数不完整 - targetAction=" + targetAction + ", targetDeviceAddress=" + targetDeviceAddress);
+            }
         } else {
-            updateStatus("BLUETOOTH_SCAN 权限未授予");
+            Log.d(TAG, "自动化: Intent为null");
         }
     }
 
-
-    @SuppressLint("NotifyDataSetChanged")
-    private void resetDeviceLists() {
-        nrdeviceList.clear();
-        nfdeviceList.clear();
-        discoveredDevicesMap.clear();
-        nrdeviceListAdapter.notifyDataSetChanged();
-        nfdeviceListAdapter.notifyDataSetChanged();
+    /**
+     * 停止自动化操作
+     */
+    private void stopAutomation() {
+        autoAction.set(false);
+        autoScan.set(false);
+        
+        // 使用BluetoothAutomationManager停止自动化操作
+        if (automationManager != null) {
+            automationManager.stopAutoAction();
+        }
+        
+        // 使用工具类停止设备发现
+        if (discoveryUtils != null) {
+            discoveryUtils.stopDiscovery();
+        }
     }
 
-    private void startAutoThread() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12及以上
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10和Android 11
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else {
-            // Android 9及以下
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
+    // ==================== 蓝牙操作方法 ====================
+
+    /**
+     * 连接设备
+     */
+    @SuppressLint("MissingPermission")
+    private void connectToDevice(BluetoothDevice device) {
+        if (device == null) {
+            Log.e(TAG, "connectToDevice: 设备为空，无法连接");
+            showErrorMessage("设备为空，无法连接");
+            return;
         }
-
-
-        // 自动更新 UI 列表
-        ScheduledExecutorService scheduler_ui = Executors.newSingleThreadScheduledExecutor();
-        scheduler_ui.scheduleWithFixedDelay(() -> {
-            if (bluetoothAdapter.isDiscovering()) {
+        
+        // 添加权限检查的详细日志
+        boolean hasPermissions = hasBluetoothPermissions();
+        Log.d(TAG, "connectToDevice: 权限检查结果 - " + hasPermissions);
+        
+        if (!hasPermissions) {
+            Log.e(TAG, "connectToDevice: 没有蓝牙权限，无法连接设备");
+            showErrorMessage("没有蓝牙权限，无法连接设备");
+            return;
+        }
+        
+        String deviceName = device.getName() != null ? device.getName() : "未知设备";
+        Log.d(TAG, "connectToDevice: 开始连接设备 - " + deviceName + ", 地址: " + device.getAddress());
+        updateStatus("正在连接设备: " + deviceName);
+        
+        // 使用工具类连接设备
+        operationUtils.connectToDevice(device, new BluetoothOperationUtils.OperationCallback() {
+            @Override
+            public void onSuccess() {
                 runOnUiThread(() -> {
-                    progressBar.setVisibility(View.VISIBLE);
-                    actionButton.setText("停止");
-                    updateStatus("正在扫描...");
-                    Log.d(TAG, "正在进行蓝牙扫描...");
+                    String successMsg = "设备连接成功: " + deviceName;
+                    showSuccessMessage(successMsg);
                 });
-            } else {
+            }
+            
+            @Override
+            public void onError(String error) {
                 runOnUiThread(() -> {
-                    progressBar.setVisibility(View.GONE);
-                    actionButton.setText("扫描");
-                    updateStatus("扫描已停止!");
-                    Log.d(TAG, "蓝牙扫描已停止...");
+                    String errorMsg = "设备连接失败: " + deviceName + " - " + error;
+                    showErrorMessage(errorMsg);
                 });
             }
-        },1, 1000, TimeUnit.MILLISECONDS); // 初始延迟为0，之后每每秒执行一次
-
-        scheduler_ui.scheduleWithFixedDelay(() -> {
-            if(auto_update){
-                updateConnectedDeviceLists();
-            }
-
-            if (!auto_update) {
-                Log.d(TAG, "auto_update: " + "自动刷新ui线程已停止");
-                scheduler_ui.shutdown();
-            }
-        },1, 1000, TimeUnit.MILLISECONDS); // 初始延迟为0，之后每秒执行一次
-
-        // 自动化操作线程
-        executorService.submit(() -> {
-            long startTime = System.currentTimeMillis();
-            while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD && !first_get_CtdDev_finish) {
-                try {
-                    Thread.sleep(300);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt(); // 恢复中断状态
-                }
-            }
-            if (targetDeviceAddress != null && !targetDeviceAddress.isEmpty() && auto_action) {
-                handleAutoAction();
-            } else {
-                Log.d(TAG, "auto_action: " + "未传入正确的参数，自动化操作线程已停止");
-            }
-            while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD && auto_action) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt(); // 恢复中断状态
-                }
-            }
-            Log.d(TAG, "auto_action: " + "自动化操作线程已停止");
         });
     }
 
-    private void handleAutoAction() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12及以上
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10和Android 11
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else {
-            // Android 9及以下
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
+    /**
+     * 断开设备连接
+     */
+    @SuppressLint("MissingPermission")
+    private void disconnectDevice(BluetoothDevice device) {
+        if (device == null) {
+            showErrorMessage("设备为空，无法断开连接");
+            return;
         }
+        
+        if (!hasBluetoothPermissions()) {
+            showErrorMessage("没有蓝牙权限，无法断开设备连接");
+            return;
+        }
+        
+        String deviceName = device.getName() != null ? device.getName() : "未知设备";
+        updateStatus("正在断开设备连接: " + deviceName);
+        
+        // 使用工具类断开设备连接
+        operationUtils.disconnectDevice(device, new BluetoothOperationUtils.OperationCallback() {
+            @Override
+            public void onSuccess() {
+                runOnUiThread(() -> {
+                    String successMsg = "设备已断开连接: " + deviceName;
+                    showSuccessMessage(successMsg);
+                });
+            }
+            
+            @Override
+            public void onError(String error) {
+                runOnUiThread(() -> {
+                    String errorMsg = "设备断开连接失败: " + deviceName + " - " + error;
+                    showErrorMessage(errorMsg);
+                });
+            }
+        });
+    }
 
-        Log.d(TAG, "auto_action: " + "正在执行自动任务");
-        int retryCount = 1;
-        final int maxRetries = 10;
-        if (Objects.equals(targetAction, "扫描")) {
-            BluetoothDevice near_device;
-            while (retryCount <= maxRetries) {
-                near_device = discoveredDevicesMap.get(targetDeviceAddress);
-                if (near_device != null) {
-                    Log.d(TAG, "已发现设备: " + near_device.getName());
-                    auto_scan = false;
-                    break; // 如果发现设备，则退出循环
-                } else {
-                    Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
-                    retryCount++;
-                    if (retryCount <= maxRetries) {
-                        try {
-                            Thread.sleep(6000); // 等待6秒
-                        } catch (InterruptedException e) {
-                            Log.e(TAG, "线程被中断", e);
-                            Thread.currentThread().interrupt();
+    /**
+     * 配对设备
+     */
+    @SuppressLint("MissingPermission")
+    private void pairDevice(BluetoothDevice device) {
+        if (device == null) {
+            Log.e(TAG, "pairDevice: 设备为空，无法配对");
+            showErrorMessage("设备为空，无法配对");
+            return;
+        }
+        
+        // 添加权限检查的详细日志
+        boolean hasPermissions = hasBluetoothPermissions();
+        Log.d(TAG, "pairDevice: 权限检查结果 - " + hasPermissions);
+        
+        if (!hasPermissions) {
+            Log.e(TAG, "pairDevice: 没有蓝牙权限，无法配对设备");
+            showErrorMessage("没有蓝牙权限，无法配对设备");
+            return;
+        }
+        
+        String deviceName = device.getName() != null ? device.getName() : "未知设备";
+        Log.d(TAG, "pairDevice: 开始配对设备 - " + deviceName + ", 地址: " + device.getAddress());
+        updateStatus("正在配对设备: " + deviceName);
+        
+        // 停止扫描
+        stopBluetoothDiscovery();
+        
+        // 使用工具类配对设备
+        operationUtils.pairDevice(device, new BluetoothOperationUtils.OperationCallback() {
+            @Override
+            public void onSuccess() {
+                runOnUiThread(() -> {
+                    String successMsg = "设备配对成功: " + deviceName;
+                    showSuccessMessage(successMsg);
+                    
+                    // 从NR或NF设备列表中移除已配对的设备
+                    removeDeviceFromDiscoveryLists(device.getAddress());
+                });
+            }
+            
+            @Override
+            public void onError(String error) {
+                runOnUiThread(() -> {
+                    String errorMsg = "设备配对失败: " + deviceName + " - " + error;
+                    showErrorMessage(errorMsg);
+                });
+            }
+        });
+    }
+
+    /**
+     * 取消配对设备
+     */
+    @SuppressLint("MissingPermission")
+    private void unpairDevice(BluetoothDevice device) {
+        if (device == null) {
+            showErrorMessage("设备为空，无法取消配对");
+            return;
+        }
+        
+        if (!hasBluetoothPermissions()) {
+            showErrorMessage("没有蓝牙权限，无法取消配对");
+            return;
+        }
+        
+        String deviceName = device.getName() != null ? device.getName() : "未知设备";
+        updateStatus("正在取消配对设备: " + deviceName);
+        
+        // 使用工具类取消配对设备
+        operationUtils.unpairDevice(device, new BluetoothOperationUtils.OperationCallback() {
+            @Override
+            public void onSuccess() {
+                runOnUiThread(() -> {
+                    String successMsg = "设备已取消配对: " + deviceName;
+                    showSuccessMessage(successMsg);
+                });
+            }
+            
+            @Override
+            public void onError(String error) {
+                runOnUiThread(() -> {
+                    String errorMsg = "取消配对失败: " + deviceName + " - " + error;
+                    showErrorMessage(errorMsg);
+                });
+            }
+        });
+    }
+
+    // ==================== 设备扫描相关方法 ====================
+
+    /**
+     * 开始扫描蓝牙设备（连续扫描模式）
+     */
+    @SuppressLint({"NotifyDataSetChanged", "MissingPermission"})
+    private void startBluetoothDiscovery() {
+        startBluetoothDiscovery(true);
+    }
+    
+    /**
+     * 开始扫描蓝牙设备
+     * @param continuousScan 是否使用连续扫描模式（true=连续扫描60秒，false=单次扫描12秒）
+     */
+    @SuppressLint({"NotifyDataSetChanged", "MissingPermission"})
+    private void startBluetoothDiscovery(boolean continuousScan) {
+        Log.d(TAG, "开始扫描蓝牙设备");
+        
+        if (!hasBluetoothPermissions()) {
+            Log.e(TAG, "没有蓝牙权限，无法扫描设备");
+            showErrorMessage("没有蓝牙权限，无法扫描设备");
+            return;
+        }
+        
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            Log.w(TAG, "蓝牙未开启，无法扫描设备");
+            showWarningMessage("蓝牙未开启，无法扫描设备");
+            return;
+        }
+        
+        if (isScanning.get()) {
+            Log.w(TAG, "正在扫描中...");
+            showWarningMessage("正在扫描中...");
+            return;
+        }
+        
+        Log.d(TAG, "开始扫描蓝牙设备...");
+        updateStatus("开始扫描蓝牙设备...");
+        
+        // 清空周围设备和非常用设备列表
+        NRDevicesMap.clear();
+        NRDeviceList.clear();
+        NFDevicesMap.clear();
+        NFDeviceList.clear();
+        adjustNRDeviceRecyclerViewHeight();
+        
+        // 清空过滤列表
+        filteredNRDeviceList.clear();
+        filteredNFDeviceList.clear();
+
+        // 更新适配器
+        NRDeviceListAdapter.notifyDataSetChanged();
+        NFDeviceListAdapter.notifyDataSetChanged();
+
+        actionButton.setText("停止扫描");
+        progressBar.setVisibility(View.VISIBLE);
+        isScanning.set(true);
+
+        Log.d(TAG, "调用discoveryUtils.startDiscovery()开始扫描蓝牙设备，扫描模式: " + (continuousScan ? "连续扫描" : "单次扫描"));
+        // 使用工具类开始扫描蓝牙设备
+        // 开始设备发现
+        discoveryUtils.startDiscovery(continuousScan, new BluetoothDiscoveryUtils.DiscoveryCallback() {
+            @Override
+            public void onDiscoveryStarted() {
+                runOnUiThread(() -> {
+                    Log.d(TAG, "蓝牙设备发现已启动 (" + (continuousScan ? "连续扫描" : "单次扫描") + ")");
+                    isScanning.set(true);
+                    actionButton.setText("停止扫描");
+                    progressBar.setVisibility(View.VISIBLE);
+//                    clearScanDeviceItem();
+                    addStatusMessage("开始扫描蓝牙设备 (" + (continuousScan ? "连续扫描" : "单次扫描") + ")");
+                });
+            }
+            
+            @Override
+            public void onDeviceFound(BluetoothDevice device, int rssi) {
+                Log.d(TAG, "onDeviceFound: 扫描设备回调被触发，RSSI: " + rssi);
+                if (device != null) {
+                    String deviceAddress = device.getAddress();
+                    @SuppressLint("MissingPermission") String deviceName = device.getName();
+
+                    // 只检查设备是否已经在已保存列表中，避免重复处理
+                    if (SavedDevicesMap.containsKey(deviceAddress)) {
+                        Log.d(TAG, "onDeviceFound: 设备已在已保存列表中，跳过 - " + deviceName);
+                        return;
+                    }
+
+                    if (NRDevicesMap.containsKey(deviceAddress) || NFDevicesMap.containsKey(deviceAddress)){
+                        Log.d(TAG, "onDeviceFound: 设备已在发现列表中，跳过 - " + deviceName);
+                        return;
+                    }
+                    Log.d(TAG, "onDeviceFound: 发现设备 - " + deviceName + ", 地址: " + deviceAddress + ", RSSI: " + rssi);
+
+                    // 根据设备名称分类并添加到相应的列表
+                    if (deviceName != null && !deviceName.isEmpty()) {
+                        Log.d(TAG, "onDeviceFound: 添加到NR设备列表 - " + deviceName);
+                        // 有名称的设备，添加到NR设备列表
+                        synchronized (NRDevicesMap) {
+                            NRDevicesMap.put(deviceAddress, device);
+                            BluetoothDeviceAdapter.BluetoothDeviceItem deviceItem =
+                                    new BluetoothDeviceAdapter.BluetoothDeviceItem(
+                                            device,
+                                            false, // 新发现的设备未配对
+                                            false // 扫描到的设备默认为未连接
+                                    );
+                            NRDeviceList.add(deviceItem);
+                        }
+                    } else {
+                        Log.d(TAG, "onDeviceFound: 添加到NF设备列表 - " + deviceAddress);
+                        // 无名称的设备，添加到NF设备列表，
+                        synchronized (NFDevicesMap) {
+                            NFDevicesMap.put(deviceAddress, device);
+                            BluetoothDeviceAdapter.BluetoothDeviceItem deviceItem =
+                                    new BluetoothDeviceAdapter.BluetoothDeviceItem(
+                                            device,
+                                            false, // 新发现的设备未配对
+                                            false // 扫描到的设备默认为未连接
+                                    );
+                            NFDeviceList.add(deviceItem);
                         }
                     }
-                }
-            }
-            auto_action = false;
-        } else if (Objects.equals(targetAction, "配对")) {
-            BluetoothDevice near_device;
-            while (retryCount <= maxRetries) {
-                BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
-                if (connected_device != null) {
-                    unpairDevice(connected_device);
-                    try {
-                        Thread.sleep(4800);
-                    } catch (InterruptedException e) {
-                        Log.e(TAG, "线程被中断", e);
-                        Thread.currentThread().interrupt();
-                    }
-                }
-                auto_scan = true;
-                near_device = discoveredDevicesMap.get(targetDeviceAddress);
-                if (near_device != null) {
-                    Log.d(TAG, "已发现设备: " + near_device.getName());
-                    auto_scan = false;
-                    pairDevice(near_device);
-                    break; // 如果发现设备，则配对并退出循环
                 } else {
-                    Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
-                    retryCount++;
-                    if (retryCount <= maxRetries) {
-                        try {
-                            Thread.sleep(6000); // 等待6秒
-                        } catch (InterruptedException e) {
-                            Log.e(TAG, "线程被中断", e);
-                            Thread.currentThread().interrupt();
-                        }
+                    Log.w(TAG, "onDeviceFound: 设备为null");
+                }
+                // 在UI线程中更新设备列表
+                runOnUiThread(() -> {
+                    // 通知NR设备列表适配器更新
+                    NRDeviceListAdapter.notifyDataSetChanged();
+                    adjustNRDeviceRecyclerViewHeight();
+                    // 通知NF设备列表适配器更新
+                    NFDeviceListAdapter.notifyDataSetChanged();
+                });
+            }
+            
+            @Override
+            public void onDiscoveryFinished() {
+                runOnUiThread(() -> {
+                    showSuccessMessage("设备扫描完成");
+                    actionButton.setText("开始扫描");
+                    progressBar.setVisibility(View.GONE);
+                    isScanning.set(false);
+                });
+            }
+            
+            @Override
+            public void onDiscoveryError(String error) {
+                runOnUiThread(() -> {
+                    updateStatus("设备扫描错误: " + error);
+                    actionButton.setText("开始扫描");
+                    progressBar.setVisibility(View.GONE);
+                    isScanning.set(false);
+                });
+            }
+            
+            @Override
+            public void onBluetoothStateChanged(int state) {
+                runOnUiThread(() -> {
+                    switch (state) {
+                        case BluetoothAdapter.STATE_ON:
+                            updateStatus("蓝牙已开启");
+                            if (hasBluetoothPermissions()) {
+                                startBluetoothDiscovery();
+                            }
+                            break;
+                        case BluetoothAdapter.STATE_OFF:
+                            updateStatus("蓝牙已关闭");
+                            break;
+                        case BluetoothAdapter.STATE_TURNING_ON:
+                            updateStatus("蓝牙正在开启...");
+                            break;
+                        case BluetoothAdapter.STATE_TURNING_OFF:
+                            updateStatus("蓝牙正在关闭...");
+                            break;
+                    }
+                });
+            }
+            
+            @Override
+            public void onBondStateChanged(BluetoothDevice device, int bondState) {
+                runOnUiThread(() -> {
+                    String deviceName = device.getName() != null ? device.getName() : "未知设备";
+                    
+                    switch (bondState) {
+                        case BluetoothDevice.BOND_BONDED:
+                            updateStatus("设备已配对: " + deviceName);
+                            updateSavedDeviceList();
+                            // 从NR或NF设备列表中移除已配对的设备
+                            removeDeviceFromDiscoveryLists(device.getAddress());
+                            break;
+                        case BluetoothDevice.BOND_BONDING:
+                            updateStatus("正在配对设备: " + deviceName);
+                            break;
+                        case BluetoothDevice.BOND_NONE:
+                            updateStatus("未配对: " + deviceName);
+                            updateSavedDeviceList();
+                            break;
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * 停止扫描蓝牙设备
+     */
+    private void stopBluetoothDiscovery() {
+        if (!isScanning.get()) {
+            return;
+        }
+        
+        updateStatus("停止扫描蓝牙设备...");
+
+        actionButton.setText("开始扫描");
+        progressBar.setVisibility(View.GONE);
+
+        // 使用工具类停止扫描蓝牙设备
+        discoveryUtils.stopDiscovery();
+        isScanning.set(false);
+    }
+
+    // ==================== 设备列表管理方法 ====================
+
+    /**
+     * 从NR或NF设备列表中移除已配对的设备
+     */
+    @SuppressLint("NotifyDataSetChanged")
+    private void removeDeviceFromDiscoveryLists(String deviceAddress) {
+        // 从NR设备列表中移除
+        boolean removedFromNR = false;
+        synchronized (NRDevicesMap) {
+            if (NRDevicesMap.containsKey(deviceAddress)) {
+                NRDevicesMap.remove(deviceAddress);
+                // 从NRDeviceList中移除对应项
+                for (int i = 0; i < NRDeviceList.size(); i++) {
+                    if (NRDeviceList.get(i).getDeviceAddress().equals(deviceAddress)) {
+                        NRDeviceList.remove(i);
+                        removedFromNR = true;
+                        break;
                     }
                 }
             }
-        }else if (Objects.equals(targetAction, "重新配对")) {
-            BluetoothDevice near_device;
-            while (retryCount <= maxRetries) {
-                BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
-                if (connected_device != null) {
-                    unpairDevice(connected_device);
-                    try {
-                        Thread.sleep(20000);
-                    } catch (InterruptedException e) {
-                        Log.e(TAG, "线程被中断", e);
-                        Thread.currentThread().interrupt();
-                    }
-                }
-                near_device = discoveredDevicesMap.get(targetDeviceAddress);
-                if (near_device != null) {
-                    Log.d(TAG, "已发现设备: " + near_device.getName());
-                    try {
-                        Thread.sleep(5000);
-                    } catch (InterruptedException e) {
-                        Log.e(TAG, "线程被中断", e);
-                        Thread.currentThread().interrupt();
-                    }
-                    auto_scan = false;
-                    pairDevice(near_device);
-//                    auto_scan = true;
-                    break; // 如果发现设备，则配对并退出循环
-                } else {
-                    Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount + 1));
-                    retryCount++;
-                    if (retryCount <= maxRetries) {
-                        try {
-                            Thread.sleep(6000); // 等待6秒
-                        } catch (InterruptedException e) {
-                            Log.e(TAG, "线程被中断", e);
-                            Thread.currentThread().interrupt();
-                        }
+        }
+        
+        // 从NF设备列表中移除
+        boolean removedFromNF = false;
+        synchronized (NFDevicesMap) {
+            if (NFDevicesMap.containsKey(deviceAddress)) {
+                NFDevicesMap.remove(deviceAddress);
+                // 从NFDeviceList中移除对应项
+                for (int i = 0; i < NFDeviceList.size(); i++) {
+                    if (NFDeviceList.get(i).getDeviceAddress().equals(deviceAddress)) {
+                        NFDeviceList.remove(i);
+                        removedFromNF = true;
+                        break;
                     }
                 }
             }
-        } else if (Objects.equals(targetAction, "连接")) {
-            auto_scan = false;
-            BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
-            if (connected_device != null) {
-                connectToDevice(connected_device);
-            }
-        } else if (Objects.equals(targetAction, "断链")) {
-            auto_scan = false;
-            BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
-            if (connected_device != null) {
-                disconnectDevice(connected_device);
-            }
-        }else if (Objects.equals(targetAction, "取消配对")) {
-            auto_scan = false;
-            BluetoothDevice connected_device = connectedDevicesMap.get(targetDeviceAddress);
-            if (connected_device != null) {
-                unpairDevice(connected_device);
-            }
-        } else {
-            Log.e(TAG, "auto_action: " + "自动化操作未指定");
         }
+        
+        // 更新UI
+        boolean finalRemovedFromNR = removedFromNR;
+        boolean finalRemovedFromNF = removedFromNF;
+        runOnUiThread(() -> {
+            if (finalRemovedFromNR) {
+                NRDeviceListAdapter.notifyDataSetChanged();
+            }
+            if (finalRemovedFromNF) {
+                NFDeviceListAdapter.notifyDataSetChanged();
+            }
+            // 调整NR设备列表高度
+            adjustNRDeviceRecyclerViewHeight();
+        });
+        
+        Log.d(TAG, "removeDeviceFromDiscoveryLists: 设备 " + deviceAddress + 
+              " 从NR列表移除: " + removedFromNR + ", 从NF列表移除: " + removedFromNF);
     }
 
-
-    private void Bluetooth_Discovery() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12及以上
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10和Android 11
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else {
-            // Android 9及以下
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
+    /**
+     * 更新已保存设备列表
+     */
+    @SuppressLint({"NotifyDataSetChanged", "MissingPermission"})
+    private void updateSavedDeviceList() {
+        Log.d(TAG, "updateSavedDeviceList: 更新已保存设备列表");
+        if (bluetoothManager == null) {
+            return;
         }
-
-        if (hasPermissions()) {
-            resetDeviceLists();
-            registerReceiver(receiver, new IntentFilter(BluetoothDevice.ACTION_FOUND));
-            bluetoothAdapter.startDiscovery();
-
-        } else {
-            updateStatus("BLUETOOTH_SCAN 权限未授予");
+    
+        if (!hasBluetoothPermissions()) {
+            return;
         }
-    }
-
-    private void stopDiscovery_click() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12及以上
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10和Android 11
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else {
-            // Android 9及以下
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        }
-        if (auto_scan) {
-            auto_scan = false;
-            discovery_handler.removeCallbacks(discoveryRunnable);
-        }
-        bluetoothAdapter.cancelDiscovery();
-    }
-
-    private void startDiscovery_click() {
-//        Bluetooth_Discovery();
-        discoveryStartTime = System.currentTimeMillis();
-        if (!auto_scan) {
-            auto_scan = true;
-            discovery_handler.post(discoveryRunnable);
-        }
-    }
-
-    @SuppressLint({"MissingPermission", "NotifyDataSetChanged"})
-    private void updateConnectedDeviceLists() {
-        Log.d(TAG, "updateConnected: " + "正在更新已保存设备");
-
+        // 将耗时操作移到后台线程
         new Thread(() -> {
-            // 准备数据
-            List<String> tempDeviceList = new ArrayList<>();
-            Map<String, BluetoothDevice> tempDevicesMap = new HashMap<>();
-
+            // 创建临时列表和映射
+            List<BluetoothDeviceAdapter.BluetoothDeviceItem> tempSavedDeviceList = new ArrayList<>();
+            Map<String, BluetoothDevice> tempSavedDevicesMap = new HashMap<>();
+            // 获取已配对设备列表
             Set<BluetoothDevice> bondedDevices = bluetoothAdapter.getBondedDevices();
             for (BluetoothDevice device : bondedDevices) {
-                ConnectionStatus connectionStatus = isDeviceConnected(device);
-                String ConnectedProfiles = connectionStatus.getConnectedProfiles();
-                boolean isConnected = connectionStatus.isConnected();
-                String deviceStatus = isConnected ? ConnectedProfiles + " 已连接" : "已配对";
-                String deviceInfo;
-                if (deviceStatus.equals("已配对")) {
-                    deviceInfo = String.format("名称: %s\n地址: %s",
-                            device.getName(),
-                            device.getAddress()
-                    );
-                } else {
-                    deviceInfo = String.format("名称: %s\n地址: %s\n状态: %s",
-                            device.getName(),
-                            device.getAddress(),
-                            deviceStatus
-                    );
-                }
-                tempDevicesMap.put(device.getAddress(), device);
-                tempDeviceList.add(deviceInfo);
+                // 在后台线程中获取设备状态信息
+                DeviceStatusInfo statusInfo = getSavedDeviceProfile(device);
+                BluetoothDeviceAdapter.BluetoothDeviceItem deviceItem =
+                        new BluetoothDeviceAdapter.BluetoothDeviceItem(
+                                device,
+                                true, // 已配对
+                                statusInfo.isConnected, // 连接状态
+                                statusInfo.statusText, // 状态文本
+                                statusInfo.profilesText // 配置文件信息
+                        );
+                tempSavedDevicesMap.put(device.getAddress(), device);
+                tempSavedDeviceList.add(deviceItem);
+    
             }
+    
+            // 在UI线程更新列表
             runOnUiThread(() -> {
-                        if (isEventProcessing) {
-                            return; // 正在处理其他事件，忽略新的事件
-                        }
-                        isEventProcessing = true;
-                        connectedDevicesMap.clear();
-                        connectedDevicesMap.putAll(tempDevicesMap);
-                        connectedDeviceList.clear();
-                        connectedDeviceList.addAll(tempDeviceList);
-                        connectedDeviceListAdapter.notifyDataSetChanged();
-                        isEventProcessing = false;
-                    });
-            if (!first_get_CtdDev_finish){
-                first_get_CtdDev_finish = true;
+                SavedDeviceList.clear();
+                SavedDevicesMap.clear();
+                SavedDeviceList.addAll(tempSavedDeviceList);
+                SavedDevicesMap.putAll(tempSavedDevicesMap);
+                SavedDeviceListAdapter.notifyDataSetChanged();
+            });
+    
+        }).start();
+    }
+    
+    /**
+     * 更新已保存设备列表（带回调）
+     */
+    @SuppressLint({"NotifyDataSetChanged", "MissingPermission"})
+    private void updateSavedDeviceListWithCallback(Runnable onComplete) {
+        Log.d(TAG, "updateSavedDeviceListWithCallback: 更新已保存设备列表");
+        if (bluetoothManager == null) {
+            if (onComplete != null) onComplete.run();
+            return;
+        }
+
+        if (!hasBluetoothPermissions()) {
+            if (onComplete != null) onComplete.run();
+            return;
+        }
+
+        // 将耗时操作移到后台线程
+        new Thread(() -> {
+            // 创建临时列表和映射
+            List<BluetoothDeviceAdapter.BluetoothDeviceItem> tempSavedDeviceList = new ArrayList<>();
+            Map<String, BluetoothDevice> tempSavedDevicesMap = new HashMap<>();
+            // 获取已配对设备列表
+            Set<BluetoothDevice> bondedDevices = bluetoothAdapter.getBondedDevices();
+            for (BluetoothDevice device : bondedDevices) {
+                // 在后台线程中获取设备状态信息
+                DeviceStatusInfo statusInfo = getSavedDeviceProfile(device);
+                BluetoothDeviceAdapter.BluetoothDeviceItem deviceItem =
+                        new BluetoothDeviceAdapter.BluetoothDeviceItem(
+                                device,
+                                true, // 已配对
+                                statusInfo.isConnected, // 连接状态
+                                statusInfo.statusText, // 状态文本
+                                statusInfo.profilesText // 配置文件信息
+                        );
+                tempSavedDevicesMap.put(device.getAddress(), device);
+                tempSavedDeviceList.add(deviceItem);
+
             }
+
+            // 在UI线程更新列表
+            runOnUiThread(() -> {
+                SavedDeviceList.clear();
+                SavedDevicesMap.clear();
+                SavedDeviceList.addAll(tempSavedDeviceList);
+                SavedDevicesMap.putAll(tempSavedDevicesMap);
+                SavedDeviceListAdapter.notifyDataSetChanged();
+
+                // 执行回调
+                if (onComplete != null) {
+                    onComplete.run();
+                }
+            });
+
         }).start();
     }
 
-    public static class ConnectionStatus {
-        boolean isConnected;
-        String connectedProfiles;
+    /**
+     * 过滤设备列表
+     */
+    private void filterDevices(String query) {
+        // 如果查询为空，显示所有设备
+        if (query.isEmpty()) {
+            filteredSavedDeviceList.clear();
+            filteredNRDeviceList.clear();
+            filteredNFDeviceList.clear();
 
-        public ConnectionStatus(boolean isConnected, String connectedProfiles) {
-            this.isConnected = isConnected;
-            this.connectedProfiles = connectedProfiles;
+            updateAdaptersNotFilteredList();
+        } else {
+            // 清空过滤列表
+            filteredSavedDeviceList.clear();
+            filteredNRDeviceList.clear();
+            filteredNFDeviceList.clear();
+            
+            // 过滤已连接设备
+            for (BluetoothDeviceAdapter.BluetoothDeviceItem device : SavedDeviceList) {
+                if (deviceMatchesQuery(device, query)) {
+                    filteredSavedDeviceList.add(device);
+                }
+            }
+            
+            // 过滤周围设备
+            for (BluetoothDeviceAdapter.BluetoothDeviceItem device : NRDeviceList) {
+                if (deviceMatchesQuery(device, query)) {
+                    filteredNRDeviceList.add(device);
+                }
+            }
+            
+            // 过滤非常用设备
+            for (BluetoothDeviceAdapter.BluetoothDeviceItem device : NFDeviceList) {
+                if (deviceMatchesQuery(device, query)) {
+                    filteredNFDeviceList.add(device);
+                }
+            }
+            
+            // 对过滤后的已保存设备列表进行排序，已连接的设备排在前面
+            filteredSavedDeviceList.sort((device1, device2) -> {
+                // 如果两个设备连接状态不同，已连接的排在前面
+                if (device1.isConnected() != device2.isConnected()) {
+                    return device1.isConnected() ? -1 : 1;
+                }
+                // 如果连接状态相同，按设备名称排序
+                String name1 = device1.getDeviceName() != null ? device1.getDeviceName() : "";
+                String name2 = device2.getDeviceName() != null ? device2.getDeviceName() : "";
+                return name1.compareToIgnoreCase(name2);
+            });
         }
+        
+        // 更新适配器
+        updateAdaptersWithFilteredList();
+    }
+    
+    /**
+     * 检查设备是否匹配查询条件
+     */
+    private boolean deviceMatchesQuery(BluetoothDeviceAdapter.BluetoothDeviceItem device, String query) {
+        String deviceName = device.getDeviceName();
+        String deviceAddress = device.getDeviceAddress();
+        
+        // 检查设备名称/地址是否包含查询字符串（不区分大小写）
+        if (deviceName != null && deviceName.toLowerCase().contains(query.toLowerCase())) {
+            return true;
+        } else return deviceAddress != null && deviceAddress.toLowerCase().contains(query.toLowerCase());
+    }
 
-        public boolean isConnected() {
-            return isConnected;
+    /**
+     * 使用过滤后的列表更新适配器
+     */
+    private void updateAdaptersWithFilteredList() {
+        if (SavedDeviceListAdapter != null) {
+            SavedDeviceListAdapter.updateDeviceList(filteredSavedDeviceList);
         }
-
-        public String getConnectedProfiles() {
-            return connectedProfiles;
+        
+        if (NRDeviceListAdapter != null) {
+            NRDeviceListAdapter.updateDeviceList(filteredNRDeviceList);
+            adjustNRDeviceRecyclerViewHeight();
+        }
+        
+        if (NFDeviceListAdapter != null) {
+            NFDeviceListAdapter.updateDeviceList(filteredNFDeviceList);
         }
     }
 
+    /**
+     * 取消过滤后的列表更新适配器
+     */
+    private void updateAdaptersNotFilteredList() {
+        if (SavedDeviceListAdapter != null) {
+            SavedDeviceListAdapter.updateDeviceList(SavedDeviceList);
+        }
 
-    private ConnectionStatus isDeviceConnected(BluetoothDevice device) {
-        String deviceAddress = device.getAddress();
+        if (NRDeviceListAdapter != null) {
+            NRDeviceListAdapter.updateDeviceList(NRDeviceList);
+            adjustNRDeviceRecyclerViewHeight();
+        }
 
-        final CountDownLatch latch = new CountDownLatch(CountDownLatch_time); // 控制异步回调的同步
-        final StringBuilder strConnected = new StringBuilder();
-        boolean[] currentStatus = {false, false, false}; // HFP, A2DP, LE Audio
+        if (NFDeviceListAdapter != null) {
+            NFDeviceListAdapter.updateDeviceList(NFDeviceList);
+        }
+    }
 
-        try {
-            // 使用异步方法检查各个设备的连接状态
-            checkHfpDeviceConnection(deviceAddress, isConnected -> handleConnectionStatus(isConnected, currentStatus, strConnected, "HFP", 0, latch));
-
-            checkA2dpDeviceConnection(deviceAddress, isConnected -> handleConnectionStatus(isConnected, currentStatus, strConnected, "A2DP", 1, latch));
-
-            checkLeAudioDeviceConnection(deviceAddress, isConnected -> handleConnectionStatus(isConnected, currentStatus, strConnected, "LE Audio", 2, latch));
-
-            latch.await(); // 等待所有回调完成
-
-            // 检查是否有任何连接类型是连接状态
-            for (boolean status : currentStatus) {
-                if (status) {
-                    return new ConnectionStatus(true, strConnected.toString());
-                }
+    /**
+     * 动态调整NRDeviceRecyclerView的高度
+     */
+    private void adjustNRDeviceRecyclerViewHeight() {
+        if (NRDeviceRecyclerView == null || NRDeviceListAdapter == null) {
+            return;
+        }
+        
+        // 在UI线程中执行
+        runOnUiThread(() -> {
+            // 测量RecyclerView的内容高度
+            NRDeviceRecyclerView.measure(
+                View.MeasureSpec.makeMeasureSpec(NRDeviceRecyclerView.getWidth(), View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            );
+            
+            int contentHeight = NRDeviceRecyclerView.getMeasuredHeight();
+            
+            // 将360dp转换为像素
+            float density = getResources().getDisplayMetrics().density;
+            int maxHeightPixels = (int) (360 * density);
+            
+            // 根据内容高度设置RecyclerView的高度
+            ViewGroup.LayoutParams layoutParams = NRDeviceRecyclerView.getLayoutParams();
+            if (contentHeight > maxHeightPixels) {
+                // 如果内容高度超过360dp，固定高度为360dp
+                layoutParams.height = maxHeightPixels;
+            } else {
+                // 否则使用wrap_content
+                layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
             }
+            
+            NRDeviceRecyclerView.setLayoutParams(layoutParams);
+        });
+    }
 
-            return new ConnectionStatus(false, strConnected.toString());
+    // ==================== 辅助工具方法 ====================
 
+    /**
+     * 获取设备连接信息（连接状态和已连接的配置文件）
+     */
+    @SuppressLint({"NewApi","MissingPermission"})
+    private DeviceConnectionInfo getDeviceConnectionInfo(BluetoothDevice device) {
+        if (device == null || bluetoothAdapter == null) {
+            return new DeviceConnectionInfo(false, new StringBuilder());
+        }
+        
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            return new DeviceConnectionInfo(false, new StringBuilder());
+        }
+        
+        // 检查常见的蓝牙配置文件
+        int[] profiles = {
+            BluetoothProfile.A2DP,       // 音频分发传输协议
+            BluetoothProfile.HEADSET,    // 耳机配置文件
+            BluetoothProfile.LE_AUDIO    // 低功耗音频
+        };
+        
+        StringBuilder profilesBuilder = new StringBuilder("连接配置: ");
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(profiles.length);
+        java.util.concurrent.atomic.AtomicBoolean isConnected = new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.concurrent.atomic.AtomicBoolean hasConnectedProfile = new java.util.concurrent.atomic.AtomicBoolean(false);
+        
+        // 检查每个配置文件的连接状态
+        for (int profile : profiles) {
+            // 为每个配置文件创建ServiceListener
+            StringBuilder finalProfilesBuilder = profilesBuilder;
+            BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
+                @Override
+                public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                    try {
+                        // 获取该配置文件的连接设备列表
+                        List<BluetoothDevice> profileDevices = proxy.getConnectedDevices();
+                        for (BluetoothDevice connectedDevice : profileDevices) {
+                            if (connectedDevice.getAddress().equals(device.getAddress())) {
+                                // 设备在此配置文件中已连接
+                                isConnected.set(true);
+                                finalProfilesBuilder.append(getProfileName(profile)).append(",");
+                                hasConnectedProfile.set(true);
+                                Log.d(TAG, getProfileName(profile) + " connected for device: " + device.getName());
+                                break;
+                            }
+                        }
+                    } catch (Exception e) {
+                        // 不记录错误日志
+                    } finally {
+                        // 释放代理资源
+                        bluetoothAdapter.closeProfileProxy(profile, proxy);
+                        latch.countDown();
+                    }
+                }
+                
+                @Override
+                public void onServiceDisconnected(int profile) {
+                    latch.countDown();
+                }
+            };
+            
+            // 获取配置文件代理
+            if (!bluetoothAdapter.getProfileProxy(this, listener, profile)) {
+                // 如果获取代理失败，直接减少计数器
+                latch.countDown();
+            }
+        }
+        
+        // 等待所有配置文件检查完成
+        try {
+            latch.await();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            Log.e(TAG, "Interrupted while waiting for latch: " + e);
-            return new ConnectionStatus(false, strConnected.toString());
-        } catch (Exception e) {
-            Log.e(TAG, "Error: " + e);
-            return new ConnectionStatus(false, strConnected.toString());
+        }
+        
+        // 如果没有已连接的配置文件，移除"连接配置: "前缀
+        if (!hasConnectedProfile.get()) {
+            profilesBuilder = new StringBuilder();
+        }
+        
+        return new DeviceConnectionInfo(isConnected.get(), profilesBuilder);
+    }
+
+    /**
+     * 获取蓝牙配置文件的名称
+     */
+    private String getProfileName(int profile) {
+        switch (profile) {
+            case BluetoothProfile.A2DP:
+                return "A2DP";
+            case BluetoothProfile.HEADSET:
+                return "HEADSET";
+            case BluetoothProfile.HEALTH:
+                return "HEALTH";
+            case BluetoothProfile.GATT:
+                return "GATT";
+            case BluetoothProfile.GATT_SERVER:
+                return "GATT_SERVER";
+            case BluetoothProfile.LE_AUDIO:
+                return "LE_AUDIO";
+            default:
+                return "UNKNOWN(" + profile + ")";
         }
     }
 
-    // 通用的回调处理方法
-    private void handleConnectionStatus(boolean isConnected, boolean[] statusArray, StringBuilder connectionString, String connectionType, int index, CountDownLatch latch) {
-        // 检查当前状态是否和之前的状态不同，如果相同则不执行任何操作
-        if (statusArray[index] == isConnected) {
-            latch.countDown();
-            return; // 如果当前状态和之前的状态相同，直接返回
-        }
+    @SuppressLint("NewApi")
+    private DeviceStatusInfo getSavedDeviceProfile(BluetoothDevice device) {
+        String statusText;
+        String profilesText;
 
-        statusArray[index] = isConnected;
+        // 使用getDeviceConnectionInfo方法获取设备连接信息
+        DeviceConnectionInfo connectionInfo = getDeviceConnectionInfo(device);
+        boolean isConnected = connectionInfo.isConnected;
 
         if (isConnected) {
-            if (connectionString.length() > 0) {
-                connectionString.append("/").append(connectionType);
-            } else {
-                connectionString.append(connectionType);
-            }
-            Log.d(TAG, "设备" + connectionType + "已连接");
-        } else {
-            Log.d(TAG, "设备" + connectionType + "未连接");
-        }
+            statusText = "已连接";
 
-        latch.countDown(); // 回调完成，计数器减一
+            // 去除profilesBuilder末尾的逗号
+            String profilesStr = connectionInfo.profilesBuilder.toString().trim();
+            if (profilesStr.endsWith(",")) {
+                profilesStr = profilesStr.substring(0, profilesStr.length() - 1);
+            }
+            profilesText = "(" + profilesStr + ")";
+        } else {
+            // 未连接设备不显示状态字符串
+            statusText = "";
+            // 未连接设备不显示配置文件信息
+            profilesText = null;
+        }
+        
+        return new DeviceStatusInfo(isConnected, statusText, profilesText);
     }
 
-    private void pairDevice(BluetoothDevice device) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12及以上
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10和Android 11
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else {
-            // Android 9及以下
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        }
-
-        if (hasPermissions()) {
-            new Thread(() -> {
-                try {
-                    long duration = 30000; // 30秒
-                    long startTime = 0;
-                    if (device.getBondState() == BluetoothDevice.BOND_NONE) {
-                        boolean pairingResult = device.createBond();
-                        startTime = System.currentTimeMillis();
-                        runOnUiThread(() -> {
-                            if (pairingResult) {
-                                updateStatus("建链请求已发起，请在系统设置中确认");
-                                Log.d(TAG, "建链请求已发起，请在系统设置中确认");
-                            } else {
-                                updateStatus("配对失败: " + device.getName());
-                                Log.d(TAG, "配对失败: " + device.getName());
-                            }
-                        });
-                    }
-//
-                    long elapsedTime = System.currentTimeMillis() - startTime;
-                    while (elapsedTime < duration) {
-                        if (isDeviceConnected(device).isConnected()) {
-//                            try {
-//                                for (Method method : device.getClass().getDeclaredMethods()) {
-//                                    Log.d("BluetoothMethods", method.getName());
-//                                }
-//                                Method getUuids = device.getClass().getMethod("getUuids");
-//                                ParcelUuid[] uuids = (ParcelUuid[]) getUuids.invoke(device);
-//                                if (uuids != null) {
-//                                    for (ParcelUuid parcelUuid : uuids) {
-//                                        // 获取并打印 UUID
-//                                        UUID uuid = parcelUuid.getUuid();
-//                                        Log.d("BluetoothUUID", "UUID: " + uuid.toString());
-//                                    }
-//                                } else {
-//                                    Log.d("BluetoothUUID", "No UUIDs available for this device.");
-//                                }
-//                            } catch (NoSuchMethodException e) {
-//                                Log.e("BluetoothMethod", "No such method", e);
-//                            } catch (IllegalAccessException e) {
-//                                Log.e("BluetoothMethod", "Illegal access", e);
-//                            } catch (InvocationTargetException e) {
-//                                Log.e("BluetoothMethod", "Invocation target exception", e);
-//                            }
-                            break;
-                        }
-                        Thread.sleep(500);
-                        elapsedTime = System.currentTimeMillis() - startTime;
-                    }
-                    if (isDeviceConnected(device).isConnected()){
-                        updateStatus("设备已连接: " + device.getName());
-                        Log.d(TAG, "result: " + device.getName() + "已连接\n" + "配对时间:" + elapsedTime + "ms");
-                    }else{
-                        updateStatus("设备配对失败: " + device.getName());
-                        Log.d(TAG, "result: " + device.getName() + "配对失败");
-                    }
-                } catch (Exception e) {
-                    Thread.currentThread().interrupt();
-                }
-                auto_action = false;
-            }).start();
-        } else {
-            updateStatus("BLUETOOTH_CONNECT 权限未授予");
-        }
-    }
-
-
-    private void connectToDevice(BluetoothDevice device) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12及以上
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10和Android 11
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else {
-            // Android 9及以下
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        }
-
-        if (hasPermissions()) {
-            new Thread(() -> {
-                try {
-                    if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
-                        updateStatus("设备正在连接: " + device.getName());
-                        Log.d(TAG,"BluetoothProfile:" + "正在连接");
-                        try {
-                            Method connectDevice = device.getClass().getMethod("connect");
-                            boolean result = (Boolean) connectDevice.invoke(device);
-                            if (result) {
-                                Log.d(TAG,"BluetoothProfile: 连接成功");
-                            }
-
-                        } catch (NoSuchMethodException e) {
-                            Log.e(TAG, "BluetoothMethods:" + "No such method", e);
-                            DevHelper.connectA2dp(device);
-                            DevHelper.connectHfp(device);
-                        } catch (IllegalAccessException e) {
-                            Log.e(TAG, "BluetoothMethods:" + "Illegal access", e);
-                            DevHelper.connectA2dp(device);
-                            DevHelper.connectHfp(device);
-                        } catch (InvocationTargetException e) {
-                            Log.e(TAG, "BluetoothMethods:" + "Invocation target exception", e);
-                            DevHelper.connectA2dp(device);
-                            DevHelper.connectHfp(device);
-//                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && device.getType() == BluetoothDevice.DEVICE_TYPE_LE) {
-//                                Log.d(TAG, "BluetoothProfile:" + "这是一个LE Audio设备");
-//                                return;
-//                            }else{
-//                                DevHelper.connectA2dp(device);
-//                                DevHelper.connectHfp(device);
-//                            }
-                        }
-                    }
-                    Thread.sleep(1000);
-
-                    long startTime = System.currentTimeMillis();
-                    long duration = 30000; // 30秒超时
-                    long elapsedTime = System.currentTimeMillis() - startTime;
-                    while (elapsedTime <= duration) {
-                        if (isDeviceConnected(device).isConnected()) {
-                            updateStatus("设备已连接: " + device.getName());
-                            Log.d(TAG, "result: " + device.getName() + "已连接");
-                            auto_action = false;
-                            return;
-                        }
-                        Thread.sleep(500);
-                        elapsedTime = System.currentTimeMillis() - startTime;
-                    }
-                    if (!isDeviceConnected(device).isConnected()) {
-                        updateStatus("设备连接失败: " + device.getName());
-                        Log.d(TAG, "result: " + device.getName() + "连接失败");
-                    }
-                } catch (InterruptedException e) {
-                    updateStatus("设备连接失败: " + device.getName());
-                    Log.d(TAG, "result: " + device.getName() + "连接失败");
-                }
-                auto_action = false;
-            }).start();
-        } else {
-            updateStatus("BLUETOOTH_CONNECT 权限未授予");
-        }
-    }
-
-    private void disconnectDevice(BluetoothDevice device) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12及以上
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10和Android 11
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else {
-            // Android 9及以下
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        }
-
-        if (hasPermissions()) {
-            new Thread(() -> {
-                try{
-                    if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
-                        updateStatus("设备正在断链: " + device.getName());
-                        Log.d(TAG, "disconnect: 正在断链");
-                        try {
-                            Method disconnectDevice = device.getClass().getMethod("disconnect");
-                            boolean result = (Boolean) disconnectDevice.invoke(device);
-                            if (result) {
-                                Log.d(TAG, "disconnect: 断链成功");
-                            }
-
-                        } catch (NoSuchMethodException e) {
-                            Log.e("BluetoothMethods", "No such method", e);
-                            DevHelper.disconnectA2dp(device);
-                            DevHelper.disconnectHfp(device);
-                        } catch (IllegalAccessException e) {
-                            Log.e("BluetoothMethods", "Illegal access", e);
-                            DevHelper.disconnectA2dp(device);
-                            DevHelper.disconnectHfp(device);
-                        } catch (InvocationTargetException e) {
-                            Log.e("BluetoothMethods", "Invocation target exception", e);
-                            DevHelper.disconnectA2dp(device);
-                            DevHelper.disconnectHfp(device);
-
-//                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && device.getType() == BluetoothDevice.DEVICE_TYPE_LE) {
-//                                Log.d("BluetoothProfile", "这是一个LE Audio设备");
-//                                return;
-//                            }else{
-//                                DevHelper.disconnectA2dp(device);
-//                                DevHelper.disconnectHfp(device);
-//                            }
-                        }
-
-                        Thread.sleep(1000);
-
-                        long startTime = System.currentTimeMillis();
-                        long duration = 15000;
-                        while (System.currentTimeMillis() - startTime <= duration) {
-                            if (!isDeviceConnected(device).isConnected()) {
-                                updateStatus("设备已断链: " + device.getName());
-                                Log.d(TAG, "result: " + device.getName() + "已断链");
-                                auto_action = false;
-                                return;
-                            }
-                        }
-                        if (System.currentTimeMillis() - startTime > duration){
-                            updateStatus("设备断链失败: " + device.getName());
-                            Log.d(TAG, "result: " + device.getName() + "断链失败");
-                        }
-                    }
-                } catch (InterruptedException e) {
-                    updateStatus("设备断链失败: " + device.getName());
-                    Log.d(TAG, "result: " + device.getName() + "断链失败");
-                }
-                auto_action = false;
-            }).start();
-        } else {
-            updateStatus("BLUETOOTH_CONNECT 权限未授予");
-        }
-    }
-
-    private void unpairDevice(BluetoothDevice device) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12及以上
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10和Android 11
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        } else {
-            // Android 9及以下
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
-                // 权限未授予
-                requestPermissions();
-                return;
-            }
-        }
-        if (hasPermissions()) {
-            new Thread(() -> {
-                try {
-                    Method removeBondMethod = device.getClass().getMethod("removeBond");
-                    boolean result = (Boolean) removeBondMethod.invoke(device);
-                    if (result) {
-                        updateStatus("设备已解除配对: " + device.getName());
-                        Log.d(TAG, "result: " + device.getName() + "解除配对成功");
-                    } else {
-                        updateStatus("解除配对失败: " + device.getName());
-                        Log.d(TAG, "result: " + device.getName() + "解除配对失败");
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "error: " + e);
-                }
-                if (Objects.equals(targetAction, "取消配对")){
-                    auto_action = false;
-                }
-            }).start();
-        } else {
-            updateStatus("BLUETOOTH_CONNECT 权限未授予");
-        }
-    }
-
+    /**
+     * 更新状态文本
+     */
     private void updateStatus(String status) {
-        runOnUiThread(() -> statusTextView.setText(status));
+        if (statusTextView != null) {
+            statusTextView.setText(status);
+        }
+        Log.d(TAG, status);
     }
-
+    
+    /**
+     * 显示错误消息（使用Toast和状态文本）
+     */
+    private void showErrorMessage(String message) {
+        updateStatus(message);
+        ToastUtils.showError(this, message);
+        Log.e(TAG, "错误: " + message);
+    }
+    
+    /**
+     * 显示成功消息（使用Toast和状态文本）
+     */
+    private void showSuccessMessage(String message) {
+        updateStatus(message);
+        ToastUtils.showSuccess(this, message);
+        Log.i(TAG, "成功: " + message);
+    }
+    
+    /**
+     * 显示警告消息（使用Toast和状态文本）
+     */
+    private void showWarningMessage(String message) {
+        updateStatus(message);
+        ToastUtils.showWarning(this, message);
+        Log.w(TAG, "警告: " + message);
+    }
+    
+    /**
+     * 清空设备列表
+     */
     @SuppressLint("NotifyDataSetChanged")
-    private final BroadcastReceiver receiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (BluetoothDevice.ACTION_FOUND.equals(action)) {
-                BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                if (device != null) {
-                    @SuppressLint("MissingPermission") String deviceName = device.getName();
-                    String deviceAddress = device.getAddress();
-
-                    String deviceInfo;
-                    if (deviceName == null) {
-                        deviceInfo = "地址: " + deviceAddress;
-                        if (!nfdeviceList.contains(deviceInfo)) {
-                            int insertPosition = nfdeviceList.size();
-                            nfdeviceList.add(deviceInfo);
-                            NFDevicesMap.put(deviceAddress, device);
-                            runOnUiThread(() -> nfdeviceListAdapter.notifyItemInserted(insertPosition));
-                        }
-                    } else {
-                        deviceInfo = "名称: " + deviceName + "\n地址: " + deviceAddress;
-                        BluetoothDevice connected_device = connectedDevicesMap.get(deviceAddress);
-                        if (!nrdeviceList.contains(deviceInfo)) {
-                            discoveredDevicesMap.put(deviceAddress, device);
-                        }
-                        if (!nrdeviceList.contains(deviceInfo) && !(Objects.equals(device, connected_device))) {
-                            int insertPosition = nrdeviceList.size();
-                            nrdeviceList.add(deviceInfo);
-                            runOnUiThread(() -> nrdeviceListAdapter.notifyItemInserted(insertPosition));
-                        }
-                    }
-                }
-            }
+    private void clearScanDeviceItem() {
+        NRDevicesMap.clear();
+        NRDeviceList.clear();
+        NFDevicesMap.clear();
+        NFDeviceList.clear();
+        if (NRDeviceListAdapter != null) {
+            NRDeviceListAdapter.notifyDataSetChanged();
         }
-    };
-
-
-    @SuppressLint({"MissingPermission", "Wakelock"})
-    @Override
-    protected void onDestroy() {
-        Log.d(TAG,"正在关闭APP");
-        super.onDestroy();
-        unregisterReceiver(receiver);
-        if (bluetoothAdapter != null && bluetoothAdapter.isDiscovering()) {
-            bluetoothAdapter.cancelDiscovery();
+        if (NFDeviceListAdapter != null) {
+            NFDeviceListAdapter.notifyDataSetChanged();
         }
-        // 关闭 ExecutorService
-        if (executorService != null && !executorService.isShutdown()) {
-            auto_action = false;
-            auto_update = false;
-            executorService.shutdown(); // 不接受新任务，但已提交的任务会继续执行
-            try {
-                if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
-                    executorService.shutdownNow(); // 立即停止所有正在执行的任务
-                }
-            } catch (InterruptedException e) {
-                executorService.shutdownNow(); // 如果等待终止时被中断，则立即停止所有任务
-                Thread.currentThread().interrupt();
-            }
+    }
+    
+    /**
+     * 添加状态消息
+     */
+    private void addStatusMessage(String message) {
+        updateStatus(message);
+    }
+
+    // ==================== 内部类定义 ====================
+
+    /**
+     * 设备连接信息封装类
+     */
+    private static class DeviceConnectionInfo {
+        public boolean isConnected;
+        public StringBuilder profilesBuilder;
+        
+        public DeviceConnectionInfo(boolean isConnected, StringBuilder profilesBuilder) {
+            this.isConnected = isConnected;
+            this.profilesBuilder = profilesBuilder;
         }
     }
 
-    @Override
-    protected void onStart() {
-        super.onStart();
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-    }
-
-    private void startAccessibilityService() {
-        if (!isAccessibilityServiceEnabled(this)) {
-            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-            startActivity(intent);
-            Toast.makeText(this, "请手动开启无障碍服务", Toast.LENGTH_SHORT).show();
-        } else {
-            Toast.makeText(this, "无障碍服务已启用", Toast.LENGTH_SHORT).show();
+    /**
+     * 设备状态信息封装类
+     */
+    private static class DeviceStatusInfo {
+        public boolean isConnected;
+        public String statusText;
+        public String profilesText;
+        
+        public DeviceStatusInfo(boolean isConnected, String statusText, String profilesText) {
+            this.isConnected = isConnected;
+            this.statusText = statusText;
+            this.profilesText = profilesText;
         }
     }
-
-    private boolean isAccessibilityServiceEnabled(Context context) {
-        String service = context.getPackageName() + "/" + MyAccessibilityService.class.getCanonicalName();
-        String enabledServices = Settings.Secure.getString(
-                context.getContentResolver(),
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        return enabledServices != null && enabledServices.contains(service);
-    }
-
 }

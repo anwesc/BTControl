@@ -43,6 +43,42 @@
                 android:src="@mipmap/accessibility" />
         </LinearLayout>
 
+        <!-- 搜索框 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp"
+            android:gravity="center_vertical">
+
+            <EditText
+                android:id="@+id/searchEditText"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/search_background"
+                android:drawableStart="@android:drawable/ic_menu_search"
+                android:drawablePadding="8dp"
+                android:hint="@string/搜索设备"
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:singleLine="true"
+                android:textColorHint="?android:textColorHint"
+                android:textSize="14sp" />
+
+            <ImageButton
+                android:id="@+id/clearSearchButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/清除搜索"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:visibility="gone" />
+        </LinearLayout>
+
         <!-- 已保存设备 -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -52,7 +88,7 @@
             android:layout_marginBottom="8dp">
 
             <TextView
-                android:id="@+id/connectedDevicesLabel"
+                android:id="@+id/SavedDevicesLabel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/已保存设备"
@@ -78,7 +114,7 @@
         </LinearLayout>
 
         <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/connectedDeviceRecyclerView"
+            android:id="@+id/SavedDeviceRecyclerView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp" />
@@ -118,7 +154,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_horizontal"
-                android:text="@string/停止"
+                android:text="@string/停止扫描"
                 android:textColor="?android:textColorPrimary" />
 
         </LinearLayout>
@@ -142,7 +178,7 @@
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/NFDeviceRecyclerView"
             android:layout_width="match_parent"
-            android:layout_height="180dp"
+            android:layout_height="160dp"
             android:layout_marginBottom="16dp" />
     </LinearLayout>
 

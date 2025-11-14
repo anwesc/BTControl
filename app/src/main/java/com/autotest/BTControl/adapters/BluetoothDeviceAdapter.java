@@ -1,0 +1,342 @@
+package com.autotest.BTControl.adapters;
+
+import android.annotation.SuppressLint;
+import android.bluetooth.BluetoothDevice;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.autotest.BTControl.R;
+import com.autotest.BTControl.utils.VibrationUtils;
+
+import java.util.List;
+
+/**
+ * 蓝牙设备列表适配器
+ */
+public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDeviceAdapter.DeviceViewHolder> {
+    
+    private final List<BluetoothDeviceItem> deviceList;
+    private final DeviceClickListener clickListener;
+    private final DeviceLongClickListener longClickListener;
+    
+    /**
+     * 构造函数
+     * @param deviceList 设备列表
+     * @param clickListener 点击监听器
+     * @param longClickListener 长按监听器
+     */
+    public BluetoothDeviceAdapter(List<BluetoothDeviceItem> deviceList, DeviceClickListener clickListener, 
+                                DeviceLongClickListener longClickListener) {
+        this.deviceList = deviceList;
+        this.clickListener = clickListener;
+        this.longClickListener = longClickListener;
+    }
+    
+    @NonNull
+    @Override
+    public DeviceViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(parent.getContext())
+                .inflate(R.layout.item_bluetooth_device, parent, false);
+        return new DeviceViewHolder(view);
+    }
+    
+    @Override
+        public void onBindViewHolder(@NonNull DeviceViewHolder holder, int position) {
+            BluetoothDeviceItem deviceItem = deviceList.get(position);
+            String deviceName = deviceItem.getDeviceName();
+            
+            // 当设备名为空时，隐藏设备名称的TextView并设置其高度为0
+            if (deviceName == null || deviceName.isEmpty()) {
+                holder.deviceNameTextView.setVisibility(View.GONE);
+                holder.deviceNameTextView.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0));
+            } else {
+                holder.deviceNameTextView.setVisibility(View.VISIBLE);
+                holder.deviceNameTextView.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                holder.deviceNameTextView.setText(deviceName);
+            }
+            
+            holder.deviceAddressTextView.setText(deviceItem.getDeviceAddress());
+            String deviceStatus = deviceItem.getDeviceStatus();
+            
+            // 处理设备状态和配置文件信息
+            String profilesText = deviceItem.getProfilesText();
+            
+            // 合并状态和配置文件信息显示
+            if (deviceStatus != null && !deviceStatus.isEmpty()) {
+                holder.deviceStatusTextView.setVisibility(View.VISIBLE);
+                holder.deviceStatusTextView.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                holder.deviceStatusTextView.setText(deviceStatus);
+                
+                // 如果有配置文件信息，显示在同一行
+                if (profilesText != null && !profilesText.trim().isEmpty()) {
+                    holder.deviceProfilesTextView.setVisibility(View.VISIBLE);
+                    holder.deviceProfilesTextView.setLayoutParams(new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+                    holder.deviceProfilesTextView.setText(profilesText);
+                } else {
+                    holder.deviceProfilesTextView.setVisibility(View.GONE);
+                    holder.deviceProfilesTextView.setLayoutParams(new LinearLayout.LayoutParams(
+                        0, 0));
+                }
+            } else {
+                // 没有状态信息，只显示配置文件信息（如果有）
+                holder.deviceStatusTextView.setVisibility(View.GONE);
+                holder.deviceStatusTextView.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, 0));
+                
+                if (profilesText != null && !profilesText.trim().isEmpty()) {
+                    holder.deviceProfilesTextView.setVisibility(View.VISIBLE);
+                    holder.deviceProfilesTextView.setLayoutParams(new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                    holder.deviceProfilesTextView.setText(profilesText);
+                } else {
+                    holder.deviceProfilesTextView.setVisibility(View.GONE);
+                    holder.deviceProfilesTextView.setLayoutParams(new LinearLayout.LayoutParams(
+                        0, 0));
+                }
+            }
+            
+            // 设置点击事件
+            holder.itemView.setOnClickListener(v -> {
+                // 添加点击震动反馈
+                VibrationUtils.performLightVibration(v.getContext());
+                
+                // 添加点击动画效果
+                v.startAnimation(android.view.animation.AnimationUtils.loadAnimation(v.getContext(), R.anim.item_click_scale_down));
+                
+                if (clickListener != null) {
+                    clickListener.onDeviceClick(position, deviceItem);
+                }
+                
+                // 恢复动画
+                v.postDelayed(() -> {
+                    v.startAnimation(android.view.animation.AnimationUtils.loadAnimation(v.getContext(), R.anim.item_click_scale_up));
+                }, 100);
+            });
+            
+            // 设置长按事件
+            holder.itemView.setOnLongClickListener(v -> {
+                // 添加长按震动反馈
+                VibrationUtils.performLongPressVibration(v.getContext());
+                
+                // 添加长按动画效果
+                v.startAnimation(android.view.animation.AnimationUtils.loadAnimation(v.getContext(), R.anim.item_long_press_scale_down));
+                
+                if (longClickListener != null) {
+                    longClickListener.onDeviceLongClick(position, deviceItem);
+                    
+                    // 恢复动画
+                    v.postDelayed(() -> {
+                        v.startAnimation(android.view.animation.AnimationUtils.loadAnimation(v.getContext(), R.anim.item_long_press_scale_up));
+                    }, 150);
+                    
+                    return true;
+                }
+                return false;
+            });
+        }
+    
+    @Override
+    public int getItemCount() {
+        return deviceList.size();
+    }
+    
+    /**
+     * 更新设备列表
+     * @param newDeviceList 新的设备列表
+     */
+    @SuppressLint("NotifyDataSetChanged")
+    public void updateDeviceList(List<BluetoothDeviceItem> newDeviceList) {
+        this.deviceList.clear();
+        this.deviceList.addAll(newDeviceList);
+        notifyDataSetChanged();
+    }
+    
+    /**
+     * 设备ViewHolder
+     */
+    static class DeviceViewHolder extends RecyclerView.ViewHolder {
+        TextView deviceNameTextView;
+        TextView deviceAddressTextView;
+        TextView deviceStatusTextView;
+        TextView deviceProfilesTextView;
+        
+        public DeviceViewHolder(@NonNull View itemView) {
+            super(itemView);
+            deviceNameTextView = itemView.findViewById(R.id.deviceNameTextView);
+            deviceAddressTextView = itemView.findViewById(R.id.deviceAddressTextView);
+            deviceStatusTextView = itemView.findViewById(R.id.deviceStatusTextView);
+            deviceProfilesTextView = itemView.findViewById(R.id.deviceProfilesTextView);
+        }
+    }
+    
+    /**
+     * 设备点击监听器
+     */
+    public interface DeviceClickListener {
+        void onDeviceClick(int position, BluetoothDeviceItem deviceItem);
+    }
+    
+    /**
+     * 设备长按监听器接口
+     */
+    public interface DeviceLongClickListener {
+        void onDeviceLongClick(int position, BluetoothDeviceItem device);
+    }
+    
+    /**
+     * 蓝牙设备项数据类
+     */
+    public static class BluetoothDeviceItem {
+        private String deviceName;
+        private String deviceAddress;
+        private String deviceStatus;
+        private String profilesText; // 新增：存储已连接的蓝牙配置文件信息
+        private boolean isConnected;
+        private boolean isPaired;
+        private BluetoothDevice bluetoothDevice;
+        private boolean updateStatus; // 是否更新状态
+        private boolean showUnpairedStatus; // 是否显示"未配对"状态
+
+        public BluetoothDeviceItem(BluetoothDevice device, boolean isPaired, boolean isConnected) {
+            this.bluetoothDevice = device;
+            @SuppressLint("MissingPermission") String name = device.getName();
+            this.deviceName = (name != null && !name.equals("未知设备")) ? name : "";
+            this.deviceAddress = device.getAddress();
+            this.isPaired = isPaired;
+            this.isConnected = isConnected;
+            
+            // 如果不更新状态，初始化为空字符串
+            if (!updateStatus) {
+                this.deviceStatus = "";
+            } else {
+                updateStatus();
+            }
+        }
+
+        // 新增构造函数，支持设置配置文件信息
+        public BluetoothDeviceItem(BluetoothDevice device, boolean isPaired, boolean isConnected, 
+                                 String customStatusText, String profilesText) {
+            this.bluetoothDevice = device;
+            @SuppressLint("MissingPermission") String name = device.getName();
+            this.deviceName = (name != null && !name.equals("未知设备")) ? name : "";
+            this.deviceAddress = device.getAddress();
+            this.isPaired = isPaired;
+            this.isConnected = isConnected;
+            this.updateStatus = false; // 使用自定义状态文本，不自动更新
+            this.showUnpairedStatus = false; // 不显示"未配对"状态
+            
+            // 直接设置自定义状态文本
+            this.deviceStatus = customStatusText;
+            
+            // 设置配置文件信息
+            this.profilesText = profilesText;
+        }
+        
+        private void updateStatus() {
+            if (!updateStatus) {
+                // 如果不更新状态，保持当前状态不变
+                return;
+            }
+            
+            if (isConnected) {
+                deviceStatus = "已连接";
+            } else if (isPaired) {
+                deviceStatus = "已配对";
+            } else {
+                // 根据showUnpairedStatus参数决定是否显示"未配对"状态
+                if (showUnpairedStatus) {
+                    deviceStatus = "未配对";
+                } else {
+                    deviceStatus = ""; // 不显示"未配对"状态
+                }
+            }
+        }
+        
+        // Getter和Setter方法
+        public String getDeviceName() {
+            return deviceName;
+        }
+
+        public void setDeviceName(String deviceName) {
+            this.deviceName = deviceName;
+        }
+
+        public String getDeviceAddress() {
+            return deviceAddress;
+        }
+        
+        public void setDeviceAddress(String deviceAddress) {
+            this.deviceAddress = deviceAddress;
+        }
+        
+        public String getDeviceStatus() {
+            return deviceStatus;
+        }
+        
+        public void setDeviceStatus(String deviceStatus) {
+            this.deviceStatus = deviceStatus;
+        }
+        
+        public boolean isConnected() {
+            return isConnected;
+        }
+        
+        public boolean shouldUpdateStatus() {
+            return updateStatus;
+        }
+        
+        public void setUpdateStatus(boolean updateStatus) {
+            this.updateStatus = updateStatus;
+            updateStatus();
+        }
+        
+        public void setConnected(boolean connected) {
+            isConnected = connected;
+            updateStatus();
+        }
+        
+        public boolean isPaired() {
+            return isPaired;
+        }
+        
+        public void setPaired(boolean paired) {
+            isPaired = paired;
+            updateStatus();
+        }
+        
+        public BluetoothDevice getBluetoothDevice() {
+            return bluetoothDevice;
+        }
+        
+        public void setBluetoothDevice(BluetoothDevice bluetoothDevice) {
+            this.bluetoothDevice = bluetoothDevice;
+        }
+        
+        public boolean isShowUnpairedStatus() {
+            return showUnpairedStatus;
+        }
+
+        public void setShowUnpairedStatus(boolean showUnpairedStatus) {
+            this.showUnpairedStatus = showUnpairedStatus;
+            updateStatus();
+        }
+        
+        public String getProfilesText() {
+            return profilesText;
+        }
+        
+        public void setProfilesText(String profilesText) {
+            this.profilesText = profilesText;
+        }
+    }
+}
