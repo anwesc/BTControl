@@ -152,7 +152,11 @@ public class BluetoothAutomationManager {
                     break;
                 }
             }
-            
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             autoAction.set(false);
             Log.d(TAG, "自动化操作线程已停止");
         });

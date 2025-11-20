@@ -26,6 +26,7 @@ import android.widget.LinearLayout;
 
 import androidx.core.app.NotificationCompat;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -51,11 +52,11 @@ public class MyAccessibilityService extends AccessibilityService {
     private static final String CHANNEL_NAME = "蓝牙控制服务";
     
     // 时间相关常量
-    private static final long EVENT_DEBOUNCE_TIME = 1000; // 事件防抖时间（毫秒）
+    private static final long EVENT_DEBOUNCE_TIME = 300; // 事件防抖时间（毫秒）- 减少到300ms提高响应速度
     private static final long WAKELOCK_TIMEOUT = 10 * 60 * 1000L; // WakeLock超时时间（10分钟）
     private static final long OVERLAY_REMOVE_DELAY = 1000; // 覆盖层移除延迟（毫秒）
     private static final long MONITOR_INTERVAL = 5000; // 服务监控间隔（毫秒）
-    private static final long CLICK_DELAY_BASE = 1000; // 点击延迟基础时间（毫秒）
+    private static final long CLICK_DELAY_BASE = 500; // 点击延迟基础时间（毫秒）- 减少到500ms提高响应速度
 
     // 资源管理
     private PowerManager.WakeLock wakeLock;
@@ -63,7 +64,7 @@ public class MyAccessibilityService extends AccessibilityService {
     private KeyguardManager.KeyguardLock keyguardLock;
     
     // 线程管理
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService executor = Executors.newFixedThreadPool(3); // 使用固定大小线程池，提高并发处理能力
     private final ScheduledExecutorService monitorExecutor = Executors.newSingleThreadScheduledExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     
@@ -293,6 +294,15 @@ public class MyAccessibilityService extends AccessibilityService {
             Log.d(TAG + "/Package", "事件包名: " + packageName);
             Log.d(TAG, "事件类型: " + event.getEventType());
 
+            // 对于重要事件类型，直接处理，不进行防抖检查
+            if (isImportantEventType(event.getEventType())) {
+                AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+                if (rootNode != null) {
+                    handleWindowChangeEvent(rootNode);
+                }
+                return;
+            }
+
             // 只处理特定类型的事件
             if (!isTargetEventType(event.getEventType())) {
                 return;
@@ -317,6 +327,14 @@ public class MyAccessibilityService extends AccessibilityService {
             Log.e(TAG, "处理无障碍事件时出错", e);
         }
     }
+    
+    /**
+     * 判断是否是重要事件类型，重要事件类型直接处理
+     */
+    private boolean isImportantEventType(int eventType) {
+        return eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+               eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED;
+    }
 
     /**
      * 判断是否为目标事件类型
@@ -324,7 +342,10 @@ public class MyAccessibilityService extends AccessibilityService {
     private boolean isTargetEventType(int eventType) {
         return eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
                eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
-               eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED;
+               eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED ||
+               eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED ||
+               eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+               eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED;
     }
 
     /**
@@ -333,9 +354,30 @@ public class MyAccessibilityService extends AccessibilityService {
     private boolean isDuplicateEvent(AccessibilityNodeInfo rootNode) {
         long currentTime = System.currentTimeMillis();
         String currentNodeText = getRootChildText(rootNode);
+        
+        // 如果当前节点文本为空，不进行防抖检查
+        if (currentNodeText == null || currentNodeText.isEmpty()) {
+            return false;
+        }
+
+        // 检查是否是重要的弹窗（如蓝牙配对、音量警告等），如果是则不进行防抖
+        if (isImportantDialog(currentNodeText)) {
+            return false;
+        }
 
         return currentTime - lastEventTime < EVENT_DEBOUNCE_TIME &&
                 Objects.equals(currentNodeText, lastNodeText);
+    }
+    
+    /**
+     * 判断是否是重要的弹窗，重要弹窗不进行防抖
+     */
+    private boolean isImportantDialog(String nodeText) {
+        return nodeText.contains("配对") || 
+               nodeText.contains("蓝牙") ||
+               nodeText.contains("高音量") ||
+               nodeText.contains("USB") ||
+               nodeText.contains("连接");
     }
 
     /**
@@ -382,6 +424,12 @@ public class MyAccessibilityService extends AccessibilityService {
             
             // 处理其他系统弹窗
             handleSystemDialogs(rootNode);
+            
+            // 处理权限请求弹窗
+            handlePermissionDialogs(rootNode);
+            
+            // 处理应用安装弹窗
+            handleInstallDialogs(rootNode);
         } catch (Exception e) {
             Log.e(TAG, "处理窗口变化事件时出错", e);
         }
@@ -438,8 +486,8 @@ public class MyAccessibilityService extends AccessibilityService {
     private void handleVolumeWarningDialog(AccessibilityNodeInfo rootNode) {
         executor.execute(() -> {
             try {
-                List<AccessibilityNodeInfo> warningNodes = rootNode.findAccessibilityNodeInfosByText("长时间保持高音量可能会损伤听力");
-                if (!warningNodes.isEmpty()) {
+                // 检查是否包含关键字：高音量、损伤、听力
+                if (containsVolumeWarningKeywords(rootNode)) {
                     List<AccessibilityNodeInfo> confirmNodes = rootNode.findAccessibilityNodeInfosByText("确定");
                     for (AccessibilityNodeInfo confirmNode : confirmNodes) {
                         if (confirmNode.isClickable()) {
@@ -458,6 +506,53 @@ public class MyAccessibilityService extends AccessibilityService {
                 Log.e(TAG, "处理音量警告弹窗时出错", e);
             }
         });
+    }
+
+    /**
+     * 检查节点是否包含音量警告关键字
+     */
+    private boolean containsVolumeWarningKeywords(AccessibilityNodeInfo rootNode) {
+        try {
+            // 获取所有文本节点
+            List<AccessibilityNodeInfo> allNodes = new ArrayList<>();
+            findAllTextNodes(rootNode, allNodes);
+            
+            // 检查每个节点是否包含关键字
+            for (AccessibilityNodeInfo node : allNodes) {
+                CharSequence text = node.getText();
+                if (text != null) {
+                    String nodeText = text.toString();
+                    // 检查是否同时包含关键字：高音量、损伤、听力
+                    if (nodeText.contains("高音量") && nodeText.contains("损伤") && nodeText.contains("听力")) {
+                        Log.d(TAG, "发现音量警告关键字: " + nodeText);
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "检查音量警告关键字时出错", e);
+        }
+        return false;
+    }
+
+    /**
+     * 递归查找所有文本节点
+     */
+    private void findAllTextNodes(AccessibilityNodeInfo node, List<AccessibilityNodeInfo> textNodes) {
+        if (node == null) return;
+        
+        // 检查当前节点是否有文本
+        if (node.getText() != null) {
+            textNodes.add(node);
+        }
+        
+        // 递归检查子节点
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                findAllTextNodes(child, textNodes);
+            }
+        }
     }
 
     /**
@@ -501,6 +596,67 @@ public class MyAccessibilityService extends AccessibilityService {
                 }
             } catch (Exception e) {
                 Log.e(TAG, "处理USB连接弹窗时出错", e);
+            }
+        });
+    }
+    
+    /**
+     * 处理权限请求弹窗
+     */
+    private void handlePermissionDialogs(AccessibilityNodeInfo rootNode) {
+        executor.execute(() -> {
+            try {
+                // 查找权限相关的关键词
+                List<AccessibilityNodeInfo> permissionNodes = rootNode.findAccessibilityNodeInfosByText("权限");
+                if (!permissionNodes.isEmpty()) {
+                    // 查找"允许"按钮
+                    List<AccessibilityNodeInfo> allowNodes = rootNode.findAccessibilityNodeInfosByText("允许");
+                    for (AccessibilityNodeInfo allowNode : allowNodes) {
+                        if (allowNode.isClickable()) {
+                            mainHandler.postDelayed(() -> {
+                                try {
+                                    boolean result = allowNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                                    Log.d(TAG, "点击权限'允许'按钮，结果: " + result);
+                                } catch (Exception e) {
+                                    Log.e(TAG, "点击权限允许按钮时出错", e);
+                                }
+                            }, CLICK_DELAY_BASE);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "处理权限请求弹窗时出错", e);
+            }
+        });
+    }
+    
+    /**
+     * 处理应用安装弹窗
+     */
+    private void handleInstallDialogs(AccessibilityNodeInfo rootNode) {
+        executor.execute(() -> {
+            try {
+                // 查找安装相关的关键词
+                List<AccessibilityNodeInfo> installNodes = rootNode.findAccessibilityNodeInfosByText("安装");
+                if (!installNodes.isEmpty()) {
+                    // 查找"安装"按钮
+                    List<AccessibilityNodeInfo> confirmInstallNodes = rootNode.findAccessibilityNodeInfosByText("安装");
+                    for (AccessibilityNodeInfo installNode : confirmInstallNodes) {
+                        if (installNode.isClickable() && installNode.getText() != null && 
+                            installNode.getText().toString().equals("安装")) {
+                            mainHandler.postDelayed(() -> {
+                                try {
+                                    boolean result = installNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                                    Log.d(TAG, "点击'安装'按钮，结果: " + result);
+                                } catch (Exception e) {
+                                    Log.e(TAG, "点击安装按钮时出错", e);
+                                }
+                            }, CLICK_DELAY_BASE);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "处理应用安装弹窗时出错", e);
             }
         });
     }

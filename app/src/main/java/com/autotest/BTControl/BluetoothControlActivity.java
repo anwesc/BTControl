@@ -67,7 +67,6 @@ public class BluetoothControlActivity extends AppCompatActivity {
     private static final int REQUEST_BLUETOOTH_ADMIN_PERMISSIONS = 103;
     private static final int REQUEST_LOCATION_PERMISSIONS = 104;
     private static final int REQUEST_SYSTEM_ALERT_WINDOW_PERMISSION = 105;
-    private static final int REQUEST_BACKGROUND_LOCATION_PERMISSIONS = 106;
 
     // UI组件
     private Button actionButton; // 布局中唯一的按钮，用于扫描/停止扫描
@@ -138,11 +137,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
         if (!hasBluetoothPermissions()) {
             requestBluetoothPermissions();
         }
-        // 在蓝牙权限授予后，再检查并请求后台位置权限
-        if (!hasBackgroundLocationPermission()) {
-            requestBackgroundLocationPermission();
-        }
-
+        
         // 检查并请求悬浮窗权限
         if (!hasSystemAlertWindowPermission()) {
             requestSystemAlertWindowPermission();
@@ -156,8 +151,6 @@ public class BluetoothControlActivity extends AppCompatActivity {
             startDeviceMonitoring();
             startBluetoothDiscovery();
             processIntentParameters();
-            
-
         }
     }
 
@@ -223,12 +216,6 @@ public class BluetoothControlActivity extends AppCompatActivity {
                 startBluetoothDiscovery();
             } else {
                 updateStatus("蓝牙权限未授予，部分功能可能无法使用");
-            }
-        } else if (requestCode == REQUEST_BACKGROUND_LOCATION_PERMISSIONS) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                updateStatus("后台位置权限已授予");
-            } else {
-                updateStatus("后台位置权限未授予");
             }
         }
     }
@@ -593,14 +580,6 @@ public class BluetoothControlActivity extends AppCompatActivity {
     }
 
     /**
-     * 检查后台位置权限
-     */
-    @SuppressLint("InlinedApi")
-    private boolean hasBackgroundLocationPermission() {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED;
-    }
-
-    /**
      * 请求蓝牙权限
      */
     private void requestBluetoothPermissions() {
@@ -619,37 +598,6 @@ public class BluetoothControlActivity extends AppCompatActivity {
         }
         
         ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), REQUEST_BLUETOOTH_PERMISSIONS);
-    }
-
-    /**
-     * 请求后台位置权限
-     */
-    private void requestBackgroundLocationPermission() {
-        // 先检查是否已有前台位置权限
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            // 如果没有前台位置权限，先请求前台位置权限
-            requestBluetoothPermissions();
-        }
-        
-        // 显示说明对话框，解释为什么需要后台位置权限
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("需要后台位置权限")
-            .setMessage("为了在后台持续扫描和监控蓝牙设备，应用需要后台位置权限。此权限仅在应用在后台运行时使用，不会在您不使用应用时收集位置信息。")
-            .setPositiveButton("授予权限", (dialog, which) -> {
-                // 请求后台位置权限
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    ActivityCompat.requestPermissions(
-                        this, 
-                        new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, 
-                        REQUEST_BACKGROUND_LOCATION_PERMISSIONS
-                    );
-                } else {
-                    // 低于Android 10的版本不需要此权限
-                    updateStatus("当前系统版本不需要后台位置权限");
-                }
-            })
-            .setNegativeButton("取消", (dialog, which) -> updateStatus("后台位置权限未授予，应用在后台时可能无法正常扫描蓝牙设备"))
-            .show();
     }
 
     /**

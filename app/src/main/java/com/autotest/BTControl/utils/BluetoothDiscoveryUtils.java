@@ -36,7 +36,7 @@ public class BluetoothDiscoveryUtils {
     private final AtomicBoolean isScanning = new AtomicBoolean(false);
     private long scanStartTime;
     private static final long TOTAL_SCAN_DURATION = 60000; // 总扫描时间60秒
-    private static final long SYSTEM_SCAN_DURATION = 12000; // 系统扫描时间约12秒
+    private static final long SYSTEM_SCAN_DURATION = 10000; // 系统扫描时间约10秒
     private Runnable continuousScanRunnable;
     private boolean isContinuousScanMode = true; // 标记是否为连续扫描模式
     
