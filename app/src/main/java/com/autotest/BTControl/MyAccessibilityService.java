@@ -42,6 +42,7 @@ import java.util.concurrent.TimeUnit;
  * 3. 保持设备唤醒和屏幕常亮
  * 4. 监控服务状态，自动重启异常停止的服务
  */
+@SuppressLint("AccessibilityPolicy")
 public class MyAccessibilityService extends AccessibilityService {
 
     private static final String TAG = "BTControl:AccessibilityService";
@@ -138,6 +139,7 @@ public class MyAccessibilityService extends AccessibilityService {
     /**
      * 获取WakeLock，防止CPU休眠
      */
+    @SuppressLint("Wakelock")
     private void acquireWakeLock() {
         try {
             PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
@@ -489,6 +491,9 @@ public class MyAccessibilityService extends AccessibilityService {
                 // 检查是否包含关键字：高音量、损伤、听力
                 if (containsVolumeWarningKeywords(rootNode)) {
                     List<AccessibilityNodeInfo> confirmNodes = rootNode.findAccessibilityNodeInfosByText("确定");
+                    if (confirmNodes.isEmpty()) {
+                        confirmNodes = rootNode.findAccessibilityNodeInfosByText("知道了");
+                    }
                     for (AccessibilityNodeInfo confirmNode : confirmNodes) {
                         if (confirmNode.isClickable()) {
                             mainHandler.postDelayed(() -> {
@@ -501,6 +506,7 @@ public class MyAccessibilityService extends AccessibilityService {
                             }, CLICK_DELAY_BASE);
                         }
                     }
+
                 }
             } catch (Exception e) {
                 Log.e(TAG, "处理音量警告弹窗时出错", e);
@@ -523,7 +529,7 @@ public class MyAccessibilityService extends AccessibilityService {
                 if (text != null) {
                     String nodeText = text.toString();
                     // 检查是否同时包含关键字：高音量、损伤、听力
-                    if (nodeText.contains("高音量") && nodeText.contains("损伤") && nodeText.contains("听力")) {
+                    if (nodeText.contains("音量") && nodeText.contains("高") && nodeText.contains("损伤") && nodeText.contains("听力")) {
                         Log.d(TAG, "发现音量警告关键字: " + nodeText);
                         return true;
                     }

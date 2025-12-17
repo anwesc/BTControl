@@ -7,6 +7,8 @@ import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
 
+import androidx.core.content.ContextCompat;
+
 /**
  * 震动工具类，提供兼容不同Android版本的震动功能
  */
@@ -42,16 +44,15 @@ public class VibrationUtils {
         
         Vibrator vibrator = getVibrator(context);
         if (vibrator == null || !vibrator.hasVibrator()) return;
-        
+
+        long[] pattern = {0, 100, 50, 100};
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // Android 8.0及以上使用VibrationEffect
             // 震动模式：震动100毫秒，停止50毫秒，再震动100毫秒
-            long[] pattern = {0, 100, 50, 100};
             VibrationEffect effect = VibrationEffect.createWaveform(pattern, -1);
             vibrator.vibrate(effect);
         } else {
             // 旧版本直接使用vibrate方法
-            long[] pattern = {0, 100, 50, 100};
             vibrator.vibrate(pattern, -1);
         }
     }
@@ -68,10 +69,8 @@ public class VibrationUtils {
             if (vibratorManager != null) {
                 return vibratorManager.getDefaultVibrator();
             }
-        } else {
-            // 旧版本使用Vibrator服务
-            return (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
         }
-        return null;
+        // 使用 ContextCompat.getSystemService 以兼容旧版本并避免使用已弃用的 Context.VIBRATOR_SERVICE 常量
+        return ContextCompat.getSystemService(context, Vibrator.class);
     }
 }

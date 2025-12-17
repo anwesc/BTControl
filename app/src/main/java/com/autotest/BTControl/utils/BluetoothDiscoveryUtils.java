@@ -36,7 +36,7 @@ public class BluetoothDiscoveryUtils {
     private final AtomicBoolean isScanning = new AtomicBoolean(false);
     private long scanStartTime;
     private static final long TOTAL_SCAN_DURATION = 60000; // 总扫描时间60秒
-    private static final long SYSTEM_SCAN_DURATION = 10000; // 系统扫描时间约10秒
+    private static final long SCAN_DURATION = 2000; // 间隔时间2秒
     private Runnable continuousScanRunnable;
     private boolean isContinuousScanMode = true; // 标记是否为连续扫描模式
     
@@ -117,16 +117,7 @@ public class BluetoothDiscoveryUtils {
      */
     public void registerBluetoothReceiver() {
         Log.d(TAG, "注册蓝牙广播接收器");
-        
-        // 检查权限
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
-            Log.e(TAG, "没有BLUETOOTH权限，无法注册广播接收器");
-            if (callback != null) {
-                callback.onDiscoveryError("没有BLUETOOTH权限");
-            }
-            return;
-        }
-        
+
         try {
             // 注册广播接收器
             IntentFilter filter = new IntentFilter();
@@ -186,11 +177,11 @@ public class BluetoothDiscoveryUtils {
             return;
         }
         
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-            Log.e(TAG, "缺少蓝牙扫描权限");
-            callback.onDiscoveryError("缺少蓝牙扫描权限");
-            return;
-        }
+//        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+//            Log.e(TAG, "缺少蓝牙扫描权限");
+//            callback.onDiscoveryError("缺少蓝牙扫描权限");
+//            return;
+//        }
         
         // 检查位置权限（经典蓝牙扫描需要）
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -220,7 +211,7 @@ public class BluetoothDiscoveryUtils {
                         Log.d(TAG, "继续扫描，已用时: " + (elapsedTime / 1000) + "秒");
                         startSingleScan();
                         // 计划下一次扫描
-                        mainHandler.postDelayed(this, SYSTEM_SCAN_DURATION);
+                        mainHandler.postDelayed(this, SCAN_DURATION);
                     } else {
                         // 达到总扫描时间或扫描被停止
                         Log.d(TAG, "扫描完成，总用时: " + (elapsedTime / 1000) + "秒");
@@ -236,7 +227,7 @@ public class BluetoothDiscoveryUtils {
             mainHandler.post(callback::onDiscoveryStarted);
             
             // 计划下一次扫描
-            mainHandler.postDelayed(continuousScanRunnable, SYSTEM_SCAN_DURATION);
+            mainHandler.postDelayed(continuousScanRunnable, SCAN_DURATION);
         } else {
             // 单次扫描模式
             Log.d(TAG, "执行单次扫描模式");
@@ -256,7 +247,10 @@ public class BluetoothDiscoveryUtils {
             Log.w(TAG, "无法开始单次扫描：isScanning=" + isScanning.get() + ", bluetoothAdapter=" + (bluetoothAdapter != null));
             return;
         }
-        
+        // 如果系统已经在扫描，则不重复启动
+        if (bluetoothAdapter.isDiscovering()) {
+           return;
+        }
         // 开始经典蓝牙设备发现
         Log.d(TAG, "启动经典蓝牙设备发现");
         boolean classicStarted = bluetoothAdapter.startDiscovery();
@@ -312,6 +306,7 @@ public class BluetoothDiscoveryUtils {
     /**
      * 停止设备发现
      */
+    @SuppressLint("MissingPermission")
     public void stopDiscovery() {
         Log.d(TAG, "停止设备发现");
         
@@ -328,7 +323,7 @@ public class BluetoothDiscoveryUtils {
             continuousScanRunnable = null;
         }
         
-        if (bluetoothAdapter != null && ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+        if (bluetoothAdapter != null) {
             Log.d(TAG, "取消蓝牙设备发现");
             bluetoothAdapter.cancelDiscovery();
         } else {
@@ -337,7 +332,7 @@ public class BluetoothDiscoveryUtils {
 
         /*
         // 暂时关闭BLE设备扫描，只使用经典蓝牙扫描
-        if (bleScanner != null && ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED) {
+        if (bleScanner != null) {
             bleScanner.stopScan(leScanCallback);
         }
         */

@@ -118,9 +118,7 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
                 }
                 
                 // 恢复动画
-                v.postDelayed(() -> {
-                    v.startAnimation(android.view.animation.AnimationUtils.loadAnimation(v.getContext(), R.anim.item_click_scale_up));
-                }, 100);
+                v.postDelayed(() -> v.startAnimation(android.view.animation.AnimationUtils.loadAnimation(v.getContext(), R.anim.item_click_scale_up)), 100);
             });
             
             // 设置长按事件
@@ -135,9 +133,7 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
                     longClickListener.onDeviceLongClick(position, deviceItem);
                     
                     // 恢复动画
-                    v.postDelayed(() -> {
-                        v.startAnimation(android.view.animation.AnimationUtils.loadAnimation(v.getContext(), R.anim.item_long_press_scale_up));
-                    }, 150);
+                    v.postDelayed(() -> v.startAnimation(android.view.animation.AnimationUtils.loadAnimation(v.getContext(), R.anim.item_long_press_scale_up)), 150);
                     
                     return true;
                 }

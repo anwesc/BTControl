@@ -15,7 +15,9 @@ import android.os.Build;
 import android.util.Log;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 import androidx.core.content.ContextCompat;
 
@@ -74,7 +76,7 @@ public class BluetoothOperationUtils {
     
     /**
      * 检查是否有蓝牙权限
-     * @return 是否有权限
+     * @return 是否有权限（true = 已授权）
      */
     public boolean hasBluetoothPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -101,7 +103,7 @@ public class BluetoothOperationUtils {
         if (bluetoothManager == null || device == null || bluetoothAdapter == null) {
             return false;
         }
-        
+
         // 首先检查GATT连接状态
         boolean isGattConnected = false;
         try {
@@ -116,20 +118,20 @@ public class BluetoothOperationUtils {
             // GATT不支持或出错，继续检查其他配置文件
             Log.w(TAG, "检查GATT连接状态失败", e);
         }
-        
+
         // 使用更可靠的方式检查每个配置文件的连接状态
         // 通过ServiceListener获取代理对象，避免不支持的配置文件导致异常
-        
+
         // 创建一个CountDownLatch来等待所有配置文件检查完成
         java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(4);
         java.util.concurrent.atomic.AtomicBoolean isConnected = new java.util.concurrent.atomic.AtomicBoolean(false);
-        
+
         // 检查A2DP连接状态
         checkProfileConnection(device, BluetoothProfile.A2DP, isConnected, latch);
-        
+
         // 检查HEADSET连接状态
         checkProfileConnection(device, BluetoothProfile.HEADSET, isConnected, latch);
-        
+
         // 检查LE_AUDIO连接状态（如果支持）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             checkProfileConnection(device, BluetoothProfile.LE_AUDIO, isConnected, latch);
@@ -137,22 +139,26 @@ public class BluetoothOperationUtils {
             // 如果不支持，直接减少计数
             latch.countDown();
         }
-        
+
         // 检查GATT_SERVER连接状态
         checkProfileConnection(device, BluetoothProfile.GATT_SERVER, isConnected, latch);
-        
-        // 等待所有配置文件检查完成
+
+        // 等待所有配置文件检查完成（加超时，避免阻塞）
         try {
-            latch.await();
+            boolean finished = latch.await(2000, TimeUnit.MILLISECONDS); // 等待最长2秒
+            if (!finished) {
+                Log.w(TAG, "等待profile检查超时，采用已获取的结果返回");
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            Log.w(TAG, "等待profile检查被中断", e);
         }
-        
+
         // 如果GATT连接已建立，也返回true
         if (isGattConnected) {
             return true;
         }
-        
+
         return isConnected.get();
     }
     
@@ -210,22 +216,14 @@ public class BluetoothOperationUtils {
      * 获取蓝牙配置文件的名称
      */
     private String getProfileName(int profile) {
-        switch (profile) {
-            case BluetoothProfile.A2DP:
-                return "A2DP";
-            case BluetoothProfile.HEADSET:
-                return "HEADSET";
-            case BluetoothProfile.HEALTH:
-                return "HEALTH";
-            case BluetoothProfile.GATT:
-                return "GATT";
-            case BluetoothProfile.GATT_SERVER:
-                return "GATT_SERVER";
-            case BluetoothProfile.LE_AUDIO:
-                return "LE_AUDIO";
-            default:
-                return "UNKNOWN(" + profile + ")";
-        }
+        return switch (profile) {
+            case BluetoothProfile.A2DP -> "A2DP";
+            case BluetoothProfile.HEADSET -> "HEADSET";
+            case BluetoothProfile.GATT -> "GATT";
+            case BluetoothProfile.GATT_SERVER -> "GATT_SERVER";
+            case BluetoothProfile.LE_AUDIO -> "LE_AUDIO";
+            default -> "UNKNOWN(" + profile + ")";
+        };
     }
     
     
@@ -253,6 +251,7 @@ public class BluetoothOperationUtils {
         executorService.submit(() -> {
             try {
                 if (device.getBondState() == BluetoothDevice.BOND_NONE) {
+
                     boolean pairingResult = device.createBond();
                     
                     uiUpdateCallback.runOnUiThread(() -> {
@@ -274,6 +273,7 @@ public class BluetoothOperationUtils {
                             completed.set(true);
                             String deviceName = device.getName();
                             Log.i(TAG, deviceName + "已连接");
+                            Log.i(TAG, "配对时间: " + (System.currentTimeMillis() - startTime) + " ms");
                             uiUpdateCallback.runOnUiThread(() -> uiUpdateCallback.updateStatus("设备已配对: " + deviceName));
                             break;
                         }
@@ -326,15 +326,15 @@ public class BluetoothOperationUtils {
      */
     @SuppressLint("MissingPermission")
     public void connectToDevice(BluetoothDevice device, OperationCallback onComplete) {
-        // 检查蓝牙权限
+         // 检查蓝牙权限
         if (hasBluetoothPermissions()) {
-            Log.e(TAG, "没有蓝牙权限，无法连接设备");
-            if (onComplete != null) {
-                onComplete.onError("没有蓝牙权限");
-            }
-            return;
-        }
-        
+             Log.e(TAG, "没有蓝牙权限，无法连接设备");
+             if (onComplete != null) {
+                 onComplete.onError("没有蓝牙权限");
+             }
+             return;
+         }
+
         // 检查设备是否为空
         if (device == null) {
             Log.e(TAG, "设备为空，无法连接");
@@ -532,15 +532,15 @@ public class BluetoothOperationUtils {
      */
     @SuppressLint("MissingPermission")
     public void disconnectDevice(BluetoothDevice device, OperationCallback onComplete) {
-        // 检查蓝牙权限
+         // 检查蓝牙权限
         if (hasBluetoothPermissions()) {
-            Log.e(TAG, "没有蓝牙权限，无法断开设备连接");
-            if (onComplete != null) {
-                onComplete.onError("没有蓝牙权限");
-            }
-            return;
-        }
-        
+             Log.e(TAG, "没有蓝牙权限，无法断开设备连接");
+             if (onComplete != null) {
+                 onComplete.onError("没有蓝牙权限");
+             }
+             return;
+         }
+
         // 检查设备是否为空
         if (device == null) {
             Log.e(TAG, "设备为空，无法断开连接");
@@ -582,40 +582,21 @@ public class BluetoothOperationUtils {
                         AtomicInteger completedOperations = new AtomicInteger(0);
                         
                         // 计算需要尝试的操作数量
-                        final int totalOperations = 1; // A2DP
-                        final int totalOperationsFinal = totalOperations + 1; // HFP
-                        final int totalOperationsFinalWithLeAudio = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? 
-                            totalOperationsFinal + 1 : totalOperationsFinal;
-                        
-                        // 定义所有操作完成后的处理逻辑
-                        final Runnable onAllOperationsComplete = () -> {
-                            if (!anySuccess.get()) {
-                                Log.e(TAG, "所有断开连接方案均失败");
-                                uiUpdateCallback.runOnUiThread(() -> uiUpdateCallback.updateStatus("所有断开连接方案均失败: " + device.getName()));
-                            } else {
-                                Log.d(TAG, "至少一个断开连接方案成功");
-                            }
-                        };
-                        
+                        final Runnable checkAllOperationsComplete = getRunnable(device, anySuccess, completedOperations);
+
                         // 尝试使用 A2DP 断开连接
                         disconnectA2dp(device, new OperationCallback() {
                             @Override
                             public void onSuccess() {
                                 Log.d(TAG, "A2DP 代理断开连接成功: " + device.getName());
                                 anySuccess.set(true);
-                                checkAllOperationsComplete();
+                                checkAllOperationsComplete.run();
                             }
                             
                             @Override
                             public void onError(String error) {
                                 Log.e(TAG, "A2DP 代理断开连接失败: " + error);
-                                checkAllOperationsComplete();
-                            }
-                            
-                            private void checkAllOperationsComplete() {
-                                if (completedOperations.incrementAndGet() == totalOperationsFinalWithLeAudio) {
-                                    onAllOperationsComplete.run();
-                                }
+                                checkAllOperationsComplete.run();
                             }
                         });
                         
@@ -625,19 +606,13 @@ public class BluetoothOperationUtils {
                             public void onSuccess() {
                                 Log.d(TAG, "HFP 代理断开连接成功: " + device.getName());
                                 anySuccess.set(true);
-                                checkAllOperationsComplete();
+                                checkAllOperationsComplete.run();
                             }
                             
                             @Override
                             public void onError(String error) {
                                 Log.e(TAG, "HFP 代理断开连接失败: " + error);
-                                checkAllOperationsComplete();
-                            }
-                            
-                            private void checkAllOperationsComplete() {
-                                if (completedOperations.incrementAndGet() == totalOperationsFinalWithLeAudio) {
-                                    onAllOperationsComplete.run();
-                                }
+                                checkAllOperationsComplete.run();
                             }
                         });
                         
@@ -648,19 +623,13 @@ public class BluetoothOperationUtils {
                                 public void onSuccess() {
                                     Log.d(TAG, "LE Audio 代理断开连接成功: " + device.getName());
                                     anySuccess.set(true);
-                                    checkAllOperationsComplete();
+                                    checkAllOperationsComplete.run();
                                 }
                                 
                                 @Override
                                 public void onError(String error) {
                                     Log.e(TAG, "LE Audio 代理断开连接失败: " + error);
-                                    checkAllOperationsComplete();
-                                }
-                                
-                                private void checkAllOperationsComplete() {
-                                    if (completedOperations.incrementAndGet() == totalOperationsFinalWithLeAudio) {
-                                        onAllOperationsComplete.run();
-                                    }
+                                    checkAllOperationsComplete.run();
                                 }
                             });
                         } else {
@@ -726,7 +695,33 @@ public class BluetoothOperationUtils {
             }
         });
     }
-    
+
+    @NonNull
+    @SuppressLint("MissingPermission")
+    private Runnable getRunnable(BluetoothDevice device, AtomicBoolean anySuccess, AtomicInteger completedOperations) {
+        final int totalOperations = 1; // A2DP
+        final int totalOperationsFinal = totalOperations + 1; // HFP
+        final int totalOperationsFinalWithLeAudio = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ?
+            totalOperationsFinal + 1 : totalOperationsFinal;
+
+        // 定义所有操作完成后的处理逻辑
+        final Runnable onAllOperationsComplete = () -> {
+            if (!anySuccess.get()) {
+                Log.e(TAG, "所有断开连接方案均失败");
+                uiUpdateCallback.runOnUiThread(() -> uiUpdateCallback.updateStatus("所有断开连接方案均失败: " + device.getName()));
+            } else {
+                Log.d(TAG, "至少一个断开连接方案成功");
+            }
+        };
+
+        // 统一的完成检查方法，用于所有代理回调中
+        return () -> {
+            if (completedOperations.incrementAndGet() == totalOperationsFinalWithLeAudio) {
+                onAllOperationsComplete.run();
+            }
+        };
+    }
+
     /**
      * 取消设备配对
      * @param device 蓝牙设备

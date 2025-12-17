@@ -11,7 +11,7 @@ import android.widget.Toast;
  */
 public class ToastUtils {
     private static Toast currentToast;
-    private static Handler mainHandler = new Handler(Looper.getMainLooper());
+    private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     
     /**
      * 显示短时Toast消息
@@ -45,13 +45,10 @@ public class ToastUtils {
         currentToast.show();
         
         // 使用Handler在指定时间后取消Toast
-        mainHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (currentToast != null) {
-                    currentToast.cancel();
-                    currentToast = null;
-                }
+        mainHandler.postDelayed(() -> {
+            if (currentToast != null) {
+                currentToast.cancel();
+                currentToast = null;
             }
         }, duration);
     }
@@ -89,12 +86,7 @@ public class ToastUtils {
      * @param delayMillis 延迟时间（毫秒）
      */
     public static void showDelayed(Context context, String message, int duration, long delayMillis) {
-        mainHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                showToast(context, message, duration);
-            }
-        }, delayMillis);
+        mainHandler.postDelayed(() -> showToast(context, message, duration), delayMillis);
     }
     
     /**

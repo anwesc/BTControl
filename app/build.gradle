@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace 'com.autotest.BTControl'
-    compileSdk 35
+    compileSdk 36
 
     signingConfigs {
         config {
@@ -18,7 +18,7 @@ android {
     defaultConfig {
         applicationId "com.autotest.BTControl"
         minSdk 27
-        targetSdk 35
+        targetSdk 36
         versionCode 1
         versionName "3.0.0"
 
@@ -48,13 +48,24 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_11
-        targetCompatibility JavaVersion.VERSION_11
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+//    tasks.withType(JavaCompile).configureEach {
+//        options.compilerArgs += ['-Xlint:deprecation']
+//    }
+    
+    // 添加lint选项以忽略ashmem警告
+    lintOptions {
+        disable 'Deprecation'
+        disable 'ObsoleteSdkInt'
     }
 }
 
 dependencies {
 
+    // 保持当前依赖版本
     implementation libs.appcompat
     implementation libs.material
     implementation libs.activity

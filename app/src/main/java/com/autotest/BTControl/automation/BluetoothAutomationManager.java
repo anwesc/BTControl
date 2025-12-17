@@ -1,17 +1,16 @@
 package com.autotest.BTControl.automation;
 
 import android.annotation.SuppressLint;
-import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothManager;
-import android.content.Context;
 import android.util.Log;
 
 import com.autotest.BTControl.utils.BluetoothOperationUtils;
 
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -29,10 +28,9 @@ public class BluetoothAutomationManager {
     private static final int MAX_RETRIES = 10; // 最大重试次数
 
     private final BluetoothOperationUtils operationUtils;
-    private final BluetoothAdapter bluetoothAdapter;
-    private final ExecutorService executorService;
-    private final ScheduledExecutorService scheduledExecutorService;
-    
+     private final ExecutorService executorService;
+     private final ScheduledExecutorService scheduledExecutorService;
+
     // 自动化执行状态
     private final AtomicBoolean autoAction = new AtomicBoolean(false);
     private final AtomicBoolean autoScan = new AtomicBoolean(false);
@@ -61,7 +59,7 @@ public class BluetoothAutomationManager {
      * @param nrDevicesMap NR设备映射
      * @param nfDevicesMap NF设备映射
      */
-    public BluetoothAutomationManager(Context context, BluetoothOperationUtils operationUtils,
+    public BluetoothAutomationManager(BluetoothOperationUtils operationUtils,
                                       ExecutorService executorService, ScheduledExecutorService scheduledExecutorService,
                                       Map<String, BluetoothDevice> savedDevicesMap,
                                       Map<String, BluetoothDevice> nrDevicesMap,
@@ -72,8 +70,9 @@ public class BluetoothAutomationManager {
         this.savedDevicesMap = savedDevicesMap;
         this.nrDevicesMap = nrDevicesMap;
         this.nfDevicesMap = nfDevicesMap;
-        BluetoothManager bluetoothManager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
-        this.bluetoothAdapter = bluetoothManager != null ? bluetoothManager.getAdapter() : null;
+        // bluetoothAdapter 在本类中未直接使用，故不保存为字段以避免静态分析警告
+        // BluetoothManager bluetoothManager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+        // BluetoothAdapter adapter = bluetoothManager != null ? bluetoothManager.getAdapter() : null;
 
     }
     
@@ -91,24 +90,24 @@ public class BluetoothAutomationManager {
      * @param deviceAddress 设备地址
      */
     public void executeAutoAction(String action, String deviceAddress) {
+        // 如果没有蓝牙权限，则不执行自动化操作
         if (operationUtils.hasBluetoothPermissions()) {
+            Log.w(TAG, "executeAutoAction: 缺少蓝牙权限，取消自动化操作");
             return;
         }
         
         autoAction.set(true);
-        
+
         executorService.submit(() -> {
+            // 保留短延迟以便UI/系统稳定
             try {
-                Thread.sleep(1000);
+                Thread.sleep(500);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-            long startTime = System.currentTimeMillis();
 
-            // 执行具体操作
-            boolean success = false;
+            boolean success;
             String message;
-            
             switch (action) {
                 case "扫描":
                     success = executeAutoScan(deviceAddress);
@@ -138,27 +137,20 @@ public class BluetoothAutomationManager {
                     Log.e(TAG, "未知的自动化操作: " + action);
                     message = "未知的自动化操作: " + action;
                     autoAction.set(false);
+                    notifyOperationComplete(action, false, message);
+                    return;
             }
-            
+
             // 通知操作完成
             notifyOperationComplete(action, success, message);
-            
-            // 等待操作完成
-            while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD && autoAction.get()) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-            try {
-                Thread.sleep(2000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            autoAction.set(false);
-            Log.d(TAG, "自动化操作线程已停止");
+
+            // 设置一个定时任务在 AUTO_CONNECT_PERIOD 后清理 autoAction 标志，避免长期占用
+            scheduledExecutorService.schedule(() -> {
+                autoAction.set(false);
+                Log.d(TAG, "自动化操作超时/清理: autoAction 已设置为 false");
+            }, AUTO_CONNECT_PERIOD, TimeUnit.MILLISECONDS);
+
+            Log.d(TAG, "自动化操作线程已结束: action=" + action + ", success=" + success);
         });
     }
     
@@ -179,72 +171,84 @@ public class BluetoothAutomationManager {
 
         AtomicInteger retryCount = new AtomicInteger(0);
         AtomicBoolean found = new AtomicBoolean(false);
-        
-        Runnable scanRetryTask = new Runnable() {
-            @Override
-            public void run() {
-                if (!autoAction.get() || retryCount.get() >= MAX_RETRIES) {
-                    autoScan.set(false);
-                    return;
-                }
-                BluetoothDevice device = savedDevicesMap.get(deviceAddress);
-                if (device != null) {
-                    Log.d(TAG, "设备已配对，先取消配对");
+        CountDownLatch latch = new CountDownLatch(1);
 
-                    final AtomicBoolean unpairComplete = new AtomicBoolean(false);
-                    operationUtils.unpairDevice(device, new BluetoothOperationUtils.OperationCallback() {
-                        @Override
-                        public void onSuccess() {
-                            unpairComplete.set(true);
-                        }
-
-                        @Override
-                        public void onError(String error) {
-                            Log.e(TAG, "取消配对失败: " + error);
-                            unpairComplete.set(true);
-                        }
-                    });
+        // 尝试取消已配对设备的配对（如果存在）并等待回调完成（有超时）
+        BluetoothDevice paired = savedDevicesMap.get(deviceAddress);
+        if (paired != null) {
+            Log.d(TAG, "设备已配对，尝试取消配对");
+            CountDownLatch unpairLatch = new CountDownLatch(1);
+            operationUtils.unpairDevice(paired, new BluetoothOperationUtils.OperationCallback() {
+                @Override
+                public void onSuccess() {
+                    unpairLatch.countDown();
                 }
 
-                // 等待设备被发现
-                try {
-                    Thread.sleep(6000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
+                @Override
+                public void onError(String error) {
+                    Log.e(TAG, "取消配对失败: " + error);
+                    unpairLatch.countDown();
                 }
-                printNRDevices();
-                device = nrDevicesMap.get(deviceAddress);
-                if (device == null) {
-                    device = nfDevicesMap.get(deviceAddress);
-                }
-                if (device != null) {
-                    Log.d(TAG, "已发现设备: " + device.getName());
-                    notifyDeviceDiscovered(device);
-                    found.set(true);
-                    autoScan.set(false);
-                } else {
-                    Log.d(TAG, "未发现设备，重试中... 尝试次数: " + (retryCount.get() + 1));
-                    retryCount.incrementAndGet();
-                    scheduledExecutorService.schedule(this, RETRY_INTERVAL, TimeUnit.MILLISECONDS);
-                }
-            }
-        };
-        
-        scheduledExecutorService.schedule(scanRetryTask, RETRY_INTERVAL, TimeUnit.MILLISECONDS);
-        
-        // 等待扫描完成
-        long startTime = System.currentTimeMillis();
-        while (System.currentTimeMillis() - startTime < AUTO_CONNECT_PERIOD && autoAction.get() && !found.get()) {
+            });
             try {
-                Thread.sleep(1000);
+                // 最多等待10秒以便系统处理取消配对
+                boolean unpaired = unpairLatch.await(10, TimeUnit.SECONDS);
+                if (!unpaired) {
+                    Log.w(TAG, "executeAutoScan: 取消配对等待超时 (10s) for " + deviceAddress);
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                break;
             }
         }
-        
-        autoScan.set(false);
+
+        // 定期检查附近设备映射，使用 ScheduledFuture 可取消
+        final ScheduledFuture<?>[] futureRef = new ScheduledFuture<?>[1];
+        Runnable checkTask = () -> {
+            if (!autoAction.get() || retryCount.get() >= MAX_RETRIES) {
+                autoScan.set(false);
+                // 结束等待
+                try {
+                    latch.countDown();
+                } catch (Exception ignored) {}
+                if (futureRef[0] != null) futureRef[0].cancel(false);
+                return;
+            }
+
+            BluetoothDevice device = nrDevicesMap.get(deviceAddress);
+            if (device == null) device = nfDevicesMap.get(deviceAddress);
+            if (device != null) {
+                Log.d(TAG, "已发现设备: " + (device.getName() != null ? device.getName() : device.getAddress()));
+                notifyDeviceDiscovered(device);
+                found.set(true);
+                autoScan.set(false);
+                try {
+                    latch.countDown();
+                } catch (Exception ignored) {}
+                if (futureRef[0] != null) futureRef[0].cancel(false);
+            } else {
+                retryCount.incrementAndGet();
+                Log.d(TAG, "未发现设备，重试中... 尝试次数: " + retryCount.get());
+            }
+        };
+
+        // 首次检查延迟6秒，与之前行为一致
+        futureRef[0] = scheduledExecutorService.scheduleWithFixedDelay(checkTask, 6000, RETRY_INTERVAL, TimeUnit.MILLISECONDS);
+
+        try {
+            // 等待发现结果或超时
+            boolean discovered = latch.await(AUTO_CONNECT_PERIOD, TimeUnit.MILLISECONDS);
+            if (!discovered) {
+                Log.w(TAG, "executeAutoScan: 等待发现设备超时 (" + AUTO_CONNECT_PERIOD + "ms) for " + deviceAddress);
+                // 立即通知超时失败，便于UI层尽快响应
+                notifyOperationComplete("扫描", false, "扫描等待超时");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            if (futureRef[0] != null && !futureRef[0].isCancelled()) futureRef[0].cancel(false);
+            autoScan.set(false);
+        }
+
         return found.get();
     }
     
@@ -257,82 +261,105 @@ public class BluetoothAutomationManager {
         
         AtomicBoolean success = new AtomicBoolean(false);
         AtomicInteger retryCount = new AtomicInteger(0);
-        
+
         while (retryCount.get() < MAX_RETRIES && autoAction.get()) {
             // 检查设备是否已配对，如果是，先取消配对
             BluetoothDevice deviceToPair = savedDevicesMap.get(deviceAddress);
             if (deviceToPair != null) {
                 Log.d(TAG, "设备已配对，先取消配对");
-                
-                final AtomicBoolean unpairComplete = new AtomicBoolean(false);
+                CountDownLatch unpairLatch = new CountDownLatch(1);
                 operationUtils.unpairDevice(deviceToPair, new BluetoothOperationUtils.OperationCallback() {
                     @Override
                     public void onSuccess() {
-                        unpairComplete.set(true);
+                        unpairLatch.countDown();
                     }
                     
                     @Override
                     public void onError(String error) {
                         Log.e(TAG, "取消配对失败: " + error);
-                        unpairComplete.set(true);
+                        unpairLatch.countDown();
                     }
                 });
-                
-                // 等待取消配对完成
-                long startTime = System.currentTimeMillis();
-                while (!unpairComplete.get() && System.currentTimeMillis() - startTime < 20000) {
-                    try {
-                        Thread.sleep(500);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return false;
+                try {
+                    boolean unpaired = unpairLatch.await(20, TimeUnit.SECONDS);
+                    if (!unpaired) {
+                        Log.w(TAG, "executeAutoPair: 取消配对等待超时 (20s) for " + deviceAddress);
                     }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
                 }
             }
 
-            // 等待设备被发现
+            // 等待设备被发现（使用调度检查替代睡眠等待）
+             CountDownLatch foundLatch = new CountDownLatch(1);
+            AtomicInteger localRetry = new AtomicInteger(0);
+            final ScheduledFuture<?>[] futureRef = new ScheduledFuture<?>[1];
+            Runnable checkTask = () -> {
+                if (!autoAction.get() || localRetry.get() >= MAX_RETRIES) {
+                    if (futureRef[0] != null) futureRef[0].cancel(false);
+                    foundLatch.countDown();
+                    return;
+                }
+                BluetoothDevice device = nrDevicesMap.get(deviceAddress);
+                if (device == null) device = nfDevicesMap.get(deviceAddress);
+                if (device != null) {
+                    Log.d(TAG, "已发现设备: " + (device.getName() != null ? device.getName() : device.getAddress()));
+                    foundLatch.countDown();
+                    if (futureRef[0] != null) futureRef[0].cancel(false);
+                } else {
+                    localRetry.incrementAndGet();
+                    Log.d(TAG, "自动配对等待发现，尝试次数: " + localRetry.get());
+                }
+            };
+            futureRef[0] = scheduledExecutorService.scheduleWithFixedDelay(checkTask, 6000, RETRY_INTERVAL, TimeUnit.MILLISECONDS);
+
             try {
-                Thread.sleep(6000);
+                // 等待发现或超时
+                boolean foundDevice = foundLatch.await(60, TimeUnit.SECONDS);
+                if (!foundDevice) {
+                    Log.w(TAG, "executeAutoPair: 等待发现设备超时 (60s) for " + deviceAddress);
+                    // 发现等待超时，主动回调失败
+                    notifyOperationComplete("配对", false, "等待发现设备超时");
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                if (futureRef[0] != null) futureRef[0].cancel(false);
                 return false;
             }
-            printNRDevices();
+
+            // 取到设备后执行配对
             BluetoothDevice device = nrDevicesMap.get(deviceAddress);
-            if (device == null) {
-                device = nfDevicesMap.get(deviceAddress);
-            }
+            if (device == null) device = nfDevicesMap.get(deviceAddress);
             if (device != null) {
-                Log.d(TAG, "已发现设备: " + device.getName());
-                autoScan.set(false);
-                
-                // 执行配对
-                final AtomicBoolean pairComplete = new AtomicBoolean(false);
+                Log.d(TAG, "开始配对: " + (device.getName() != null ? device.getName() : device.getAddress()));
+                CountDownLatch pairLatch = new CountDownLatch(1);
                 operationUtils.pairDevice(device, new BluetoothOperationUtils.OperationCallback() {
                     @Override
                     public void onSuccess() {
-                        pairComplete.set(true);
+                        pairLatch.countDown();
                         success.set(true);
                     }
                     
                     @Override
                     public void onError(String error) {
                         Log.e(TAG, "配对失败: " + error);
-                        pairComplete.set(true);
+                        pairLatch.countDown();
                     }
                 });
-                
-                // 等待配对完成
-                long startTime = System.currentTimeMillis();
-                while (!pairComplete.get() && System.currentTimeMillis() - startTime < 30000) {
-                    try {
-                        Thread.sleep(500);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return false;
+
+                try {
+                    boolean paired = pairLatch.await(30, TimeUnit.SECONDS);
+                    if (!paired) {
+                        Log.w(TAG, "executeAutoPair: 配对等待超时 (30s) for " + deviceAddress);
+                        // 配对操作超时，主动回调失败
+                        notifyOperationComplete("配对", false, "配对操作超时");
                     }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
                 }
-                
+
                 if (success.get()) {
                     break;
                 }
@@ -351,34 +378,34 @@ public class BluetoothAutomationManager {
         Log.d(TAG, "执行自动取消配对");
 
         final AtomicBoolean unpairSuccess = new AtomicBoolean(false);
-        final AtomicBoolean unpairComplete = new AtomicBoolean(false);
 
         // 获取已配对的设备
         BluetoothDevice deviceToUnpair = savedDevicesMap.get(deviceAddress);
         if (deviceToUnpair != null) {
+            CountDownLatch unpairLatch = new CountDownLatch(1);
             operationUtils.unpairDevice(deviceToUnpair, new BluetoothOperationUtils.OperationCallback() {
                 @Override
                 public void onSuccess() {
                     unpairSuccess.set(true);
-                    unpairComplete.set(true);
+                    unpairLatch.countDown();
                 }
 
                 @Override
                 public void onError(String error) {
                     Log.e(TAG, "取消配对失败: " + error);
-                    unpairComplete.set(true);
+                    unpairLatch.countDown();
                 }
             });
 
-            // 等待取消配对完成
-            long unpairStartTime = System.currentTimeMillis();
-            while (!unpairComplete.get() && System.currentTimeMillis() - unpairStartTime < 20000) {
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
+            try {
+                boolean unpaired = unpairLatch.await(20, TimeUnit.SECONDS);
+                if (!unpaired) {
+                    Log.w(TAG, "executeAutoUnPair: 取消配对等待超时 (20s) for " + deviceAddress);
+                    // 取消配对超时，主动回调失败
+                    notifyOperationComplete("取消配对", false, "取消配对超时");
                 }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
 
         } else {
@@ -405,76 +432,98 @@ public class BluetoothAutomationManager {
             if (deviceToUnpair != null) {
                 Log.d(TAG, "设备已配对，先取消配对");
 
-                final AtomicBoolean unpairComplete = new AtomicBoolean(false);
+                CountDownLatch unpairLatch = new CountDownLatch(1);
                 operationUtils.unpairDevice(deviceToUnpair, new BluetoothOperationUtils.OperationCallback() {
                     @Override
                     public void onSuccess() {
-                        unpairComplete.set(true);
+                        unpairLatch.countDown();
                     }
 
                     @Override
                     public void onError(String error) {
                         Log.e(TAG, "取消配对失败: " + error);
-                        unpairComplete.set(true);
+                        unpairLatch.countDown();
                     }
                 });
 
-                // 等待取消配对完成
-                long startTime = System.currentTimeMillis();
-                while (!unpairComplete.get() && System.currentTimeMillis() - startTime < 20000) {
-                    try {
-                        Thread.sleep(500);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return false;
+                try {
+                    boolean unpaired = unpairLatch.await(20, TimeUnit.SECONDS);
+                    if (!unpaired) {
+                        Log.w(TAG, "executeAutoRePair: 取消配对等待超时 (20s) for " + deviceAddress);
                     }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
                 }
             }
 
             // 等待设备被发现
+            CountDownLatch foundLatch = new CountDownLatch(1);
+            AtomicInteger localRetry = new AtomicInteger(0);
+            final ScheduledFuture<?>[] futureRef = new ScheduledFuture<?>[1];
+            Runnable checkTask = () -> {
+                if (!autoAction.get() || localRetry.get() >= MAX_RETRIES) {
+                    if (futureRef[0] != null) futureRef[0].cancel(false);
+                    foundLatch.countDown();
+                    return;
+                }
+                BluetoothDevice device = nrDevicesMap.get(deviceAddress);
+                if (device == null) device = nfDevicesMap.get(deviceAddress);
+                if (device != null) {
+                    Log.d(TAG, "已发现设备: " + (device.getName() != null ? device.getName() : device.getAddress()));
+                    foundLatch.countDown();
+                    if (futureRef[0] != null) futureRef[0].cancel(false);
+                } else {
+                    localRetry.incrementAndGet();
+                    Log.d(TAG, "自动重新配对等待发现，尝试次数: " + localRetry.get());
+                }
+            };
+            futureRef[0] = scheduledExecutorService.scheduleWithFixedDelay(checkTask, 6000, RETRY_INTERVAL, TimeUnit.MILLISECONDS);
+
             try {
-                Thread.sleep(6000);
+                boolean foundDevice = foundLatch.await(60, TimeUnit.SECONDS);
+                if (!foundDevice) {
+                    Log.w(TAG, "executeAutoRePair: 等待发现设备超时 (60s) for " + deviceAddress);
+                    // 重新配对等待发现超时，主动回调失败
+                    notifyOperationComplete("重新配对", false, "等待发现设备超时");
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                if (futureRef[0] != null) futureRef[0].cancel(false);
                 return false;
             }
-            printNRDevices();
-            BluetoothDevice device = nrDevicesMap.get(deviceAddress);
-            if (device == null) {
-                device = nfDevicesMap.get(deviceAddress);
-            }
-            if (device != null) {
-                Log.d(TAG, "已发现设备: " + device.getName());
 
-                autoScan.set(false);
-                
-                // 执行配对
-                final AtomicBoolean pairComplete = new AtomicBoolean(false);
+            BluetoothDevice device = nrDevicesMap.get(deviceAddress);
+            if (device == null) device = nfDevicesMap.get(deviceAddress);
+            if (device != null) {
+                Log.d(TAG, "开始配对: " + (device.getName() != null ? device.getName() : device.getAddress()));
+                CountDownLatch pairLatch = new CountDownLatch(1);
                 operationUtils.pairDevice(device, new BluetoothOperationUtils.OperationCallback() {
                     @Override
                     public void onSuccess() {
-                        pairComplete.set(true);
+                        pairLatch.countDown();
                         success.set(true);
                     }
                     
                     @Override
                     public void onError(String error) {
                         Log.e(TAG, "配对失败: " + error);
-                        pairComplete.set(true);
+                        pairLatch.countDown();
                     }
                 });
-                
-                // 等待配对完成
-                long startTime = System.currentTimeMillis();
-                while (!pairComplete.get() && System.currentTimeMillis() - startTime < 30000) {
-                    try {
-                        Thread.sleep(500);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return false;
+
+                try {
+                    boolean paired = pairLatch.await(30, TimeUnit.SECONDS);
+                    if (!paired) {
+                        Log.w(TAG, "executeAutoRePair: 配对等待超时 (30s) for " + deviceAddress);
+                        // 重新配对中的配对操作超时，主动回调失败
+                        notifyOperationComplete("重新配对", false, "配对操作超时");
                     }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
                 }
-                
+
                 if (success.get()) {
                     break;
                 }
@@ -507,32 +556,34 @@ public class BluetoothAutomationManager {
             return false;
         }
         
-        AtomicBoolean connectComplete = new AtomicBoolean(false);
+        CountDownLatch connectLatch = new CountDownLatch(1);
         AtomicBoolean connectSuccess = new AtomicBoolean(false);
         
         operationUtils.connectToDevice(device, new BluetoothOperationUtils.OperationCallback() {
             @Override
             public void onSuccess() {
                 connectSuccess.set(true);
-                connectComplete.set(true);
+                connectLatch.countDown();
             }
             
             @Override
             public void onError(String error) {
                 Log.e(TAG, "连接失败: " + error);
-                connectComplete.set(true);
+                connectLatch.countDown();
             }
         });
         
-        // 等待连接完成
-        long startTime = System.currentTimeMillis();
-        while (!connectComplete.get() && System.currentTimeMillis() - startTime < 30000) {
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
+        try {
+            // 等待连接完成或超时
+            boolean connected = connectLatch.await(30, TimeUnit.SECONDS);
+            if (!connected) {
+                Log.w(TAG, "executeAutoConnect: 等待连接超时 (30s) for " + deviceAddress);
+                // 连接超时，主动回调失败
+                notifyOperationComplete("连接", false, "连接超时");
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
         
         return connectSuccess.get();
@@ -558,32 +609,33 @@ public class BluetoothAutomationManager {
             return false;
         }
         
-        AtomicBoolean disconnectComplete = new AtomicBoolean(false);
+        CountDownLatch disconnectLatch = new CountDownLatch(1);
         AtomicBoolean disconnectSuccess = new AtomicBoolean(false);
         
         operationUtils.disconnectDevice(device, new BluetoothOperationUtils.OperationCallback() {
             @Override
             public void onSuccess() {
                 disconnectSuccess.set(true);
-                disconnectComplete.set(true);
+                disconnectLatch.countDown();
             }
             
             @Override
             public void onError(String error) {
                 Log.e(TAG, "断链失败: " + error);
-                disconnectComplete.set(true);
+                disconnectLatch.countDown();
             }
         });
         
-        // 等待断链完成
-        long startTime = System.currentTimeMillis();
-        while (!disconnectComplete.get() && System.currentTimeMillis() - startTime < 30000) {
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
+        try {
+            boolean disconnected = disconnectLatch.await(30, TimeUnit.SECONDS);
+            if (!disconnected) {
+                Log.w(TAG, "executeAutoDisconnect: 等待断链超时 (30s) for " + deviceAddress);
+                // 断链超时，主动回调失败
+                notifyOperationComplete("断链", false, "断链超时");
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
         
         return disconnectSuccess.get();
@@ -613,6 +665,11 @@ public class BluetoothAutomationManager {
      */
     @SuppressLint("MissingPermission")
     public void printSavedDevices() {
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         Log.d(TAG, "=== 打印已保存设备列表 ===");
         if (savedDevicesMap.isEmpty()) {
             Log.d(TAG, "已保存设备列表为空");
@@ -629,21 +686,22 @@ public class BluetoothAutomationManager {
         Log.d(TAG, "=== 已保存设备列表打印完成 ===");
     }
 
-    @SuppressLint("MissingPermission")
-    public void printNRDevices() {
-        Log.d(TAG, "=== 打印附近设备列表 ===");
-        if (nrDevicesMap.isEmpty()) {
-            Log.d(TAG, "附近设备列表为空");
-            return;
-        }
-
-        Log.d(TAG, "已扫描设备总数: " + nrDevicesMap.size());
-        for (Map.Entry<String, BluetoothDevice> entry : nrDevicesMap.entrySet()) {
-            String address = entry.getKey();
-            BluetoothDevice device = entry.getValue();
-            String name = device.getName() != null ? device.getName() : "未知设备";
-            Log.d(TAG, String.format("设备地址: %s, 设备名称: %s", address, name));
-        }
-        Log.d(TAG, "=== 附近设备列表打印完成 ===");
-    }
+    // printNRDevices 方法当前未被外部调用，注释保留以便将来启用
+    // @SuppressLint("MissingPermission")
+    // public void printNRDevices() {
+    //     Log.d(TAG, "=== 打印附近设备列表 ===");
+    //     if (nrDevicesMap.isEmpty()) {
+    //         Log.d(TAG, "附近设备列表为空");
+    //         return;
+    //     }
+    //
+    //     Log.d(TAG, "已扫描设备总数: " + nrDevicesMap.size());
+    //     for (Map.Entry<String, BluetoothDevice> entry : nrDevicesMap.entrySet()) {
+    //         String address = entry.getKey();
+    //         BluetoothDevice device = entry.getValue();
+    //         String name = device.getName() != null ? device.getName() : "未知设备";
+    //         Log.d(TAG, String.format("设备地址: %s, 设备名称: %s", address, name));
+    //     }
+    //     Log.d(TAG, "=== 附近设备列表打印完成 ===");
+    // }
 }
