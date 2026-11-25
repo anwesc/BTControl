@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 次要文字按钮（CDM 关联、复制快照）：禁用时同样要变灰 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="@color/colorSecondary" android:state_enabled="true" />
+    <item android:color="@color/button_disabled" />
+</selector>

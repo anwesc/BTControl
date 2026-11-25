@@ -72,6 +72,12 @@ dependencies {
     implementation libs.activity
     implementation libs.constraintlayout
     implementation libs.bluetooth
+    // Shizuku：把 binder 调用借给 shell(uid 2000) 执行，用于绕开普通应用缺 MODIFY_PHONE_STATE 的 HFP 连接
+    implementation "dev.rikka.shizuku:api:13.1.5"
+    implementation "dev.rikka.shizuku:provider:13.1.5"
+    // 隐藏 API 豁免：Android 16 的 BluetoothHeadset 把 IBluetoothHeadset 藏在 @hide 的
+    // BluetoothProfileConnector 里，不豁免就反射不进去
+    implementation "org.lsposed.hiddenapibypass:hiddenapibypass:4.3"
     testImplementation libs.junit
     androidTestImplementation libs.ext.junit
     androidTestImplementation libs.espresso.core

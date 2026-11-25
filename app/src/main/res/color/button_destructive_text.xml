@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 危险动作按钮的文字色：禁用时要真的变灰，否则写死 @color/action_destructive 看不出不可点 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="@color/action_destructive" android:state_enabled="true" />
+    <item android:color="@color/button_disabled" />
+</selector>

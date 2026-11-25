@@ -57,4 +57,16 @@
 
     </LinearLayout>
 
+    <!-- 右侧入口：只有「已保存设备」会把它显示出来，点它才进详情页，整行点击不再进去 -->
+    <ImageView
+        android:id="@+id/deviceDetailImageView"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginStart="4dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/设备_进入详情"
+        android:padding="8dp"
+        android:src="@drawable/ic_chevron_right"
+        android:visibility="gone" />
+
 </LinearLayout>

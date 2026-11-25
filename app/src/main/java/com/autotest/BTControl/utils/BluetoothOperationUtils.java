@@ -340,6 +340,21 @@ public class BluetoothOperationUtils {
      * @param onComplete 完成回调
      */
     @SuppressLint("MissingPermission")
+    /**
+     * 隐藏 API 的返回值不统一：profile 级 connect/disconnect 与 removeBond 返回 boolean，
+     * 而 BluetoothDevice#connect() / #disconnect() 在 Android 12+ 返回 int（0 表示成功）。
+     * 直接强转 Boolean 会在真机上抛 ClassCastException，这里统一收敛。
+     */
+    private static boolean asBoolean(Object value) {
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value instanceof Integer) {
+            return (Integer) value == 0;
+        }
+        return value != null;
+    }
+
     public void connectToDevice(BluetoothDevice device, OperationCallback onComplete) {
          // 检查蓝牙权限
         if (!hasBluetoothPermissions()) {
@@ -372,7 +387,7 @@ public class BluetoothOperationUtils {
                     // 尝试使用反射方法连接
                     try {
                         Method connectMethod = device.getClass().getMethod("connect");
-                        boolean result = (Boolean) connectMethod.invoke(device);
+                        boolean result = asBoolean(connectMethod.invoke(device));
                         if (result) {
                             Log.d(TAG, "连接命令已发送，等待连接完成: " + device.getName());
                         } else {
@@ -583,7 +598,7 @@ public class BluetoothOperationUtils {
                     // 尝试使用反射方法断开连接
                     try {
                         Method disconnectMethod = device.getClass().getMethod("disconnect");
-                        boolean result = (Boolean) disconnectMethod.invoke(device);
+                        boolean result = asBoolean(disconnectMethod.invoke(device));
                         if (result) {
                             Log.d(TAG, "断开连接方法调用成功");
                         } else {
@@ -770,7 +785,7 @@ public class BluetoothOperationUtils {
             try {
                 if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
                     Method removeBondMethod = device.getClass().getMethod("removeBond");
-                    boolean result = (Boolean) removeBondMethod.invoke(device);
+                    boolean result = asBoolean(removeBondMethod.invoke(device));
                     
                     uiUpdateCallback.runOnUiThread(() -> {
                         if (result) {
@@ -823,7 +838,10 @@ public class BluetoothOperationUtils {
      * 操作回调接口
      */
     public interface OperationCallback {
+        /** 注意：回调跑在工作线程，任何 View 操作都要自己切回主线程。 */
         void onSuccess();
+
+        /** 注意：回调跑在工作线程，任何 View 操作都要自己切回主线程。 */
         void onError(String error);
     }
     
@@ -956,7 +974,7 @@ public class BluetoothOperationUtils {
             if (bluetoothA2dp != null) {
                 try {
                     Method connectMethod = BluetoothA2dp.class.getMethod("connect", BluetoothDevice.class);
-                    boolean result = (Boolean) connectMethod.invoke(bluetoothA2dp, device);
+                    boolean result = asBoolean(connectMethod.invoke(bluetoothA2dp, device));
                     if (result) {
                         callback.onSuccess();
                     } else {
@@ -977,6 +995,78 @@ public class BluetoothOperationUtils {
     }
     
     /**
+     * 借 Shizuku 以 shell 身份连 HFP（普通应用走 {@link #connectHfp} 会被 MODIFY_PHONE_STATE 拒）。
+     */
+    public void connectHfpViaShizuku(BluetoothDevice device, OperationCallback callback) {
+        runHfpViaShizuku(true, device, callback);
+    }
+
+    /** 借 Shizuku 以 shell 身份断 HFP。 */
+    public void disconnectHfpViaShizuku(BluetoothDevice device, OperationCallback callback) {
+        runHfpViaShizuku(false, device, callback);
+    }
+
+    private void runHfpViaShizuku(boolean connect, BluetoothDevice device, OperationCallback callback) {
+        initializeHeadsetProxy(() -> {
+            if (bluetoothHeadset == null) {
+                callback.onError("HFP 代理未初始化");
+                return;
+            }
+            try {
+                String result = connect
+                        ? ShizukuBridge.connectHfp(context, bluetoothHeadset, device)
+                        : ShizukuBridge.disconnectHfp(context, bluetoothHeadset, device);
+                if (result.startsWith("ok")) {
+                    callback.onSuccess();
+                } else {
+                    callback.onError(result);
+                }
+            } catch (Exception e) {
+                callback.onError("shizuku_call_failed: " + e.getMessage());
+            } finally {
+                closeHeadsetProxy();
+            }
+        });
+    }
+
+    /** 借 Shizuku 以 shell 身份连 LE Audio（普通应用反射不到 @SystemApi 的 connect）。 */
+    public void connectLeAudioViaShizuku(BluetoothDevice device, OperationCallback callback) {
+        runLeAudioViaShizuku(true, device, callback);
+    }
+
+    /** 借 Shizuku 以 shell 身份断 LE Audio。 */
+    public void disconnectLeAudioViaShizuku(BluetoothDevice device, OperationCallback callback) {
+        runLeAudioViaShizuku(false, device, callback);
+    }
+
+    private void runLeAudioViaShizuku(boolean connect, BluetoothDevice device, OperationCallback callback) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            callback.onError("leaudio_unsupported");
+            return;
+        }
+        initializeLeAudioProxy(() -> {
+            if (bluetoothLeAudio == null) {
+                callback.onError("LE Audio 代理未初始化");
+                return;
+            }
+            try {
+                String result = connect
+                        ? ShizukuBridge.connectLeAudio(context, bluetoothLeAudio, device)
+                        : ShizukuBridge.disconnectLeAudio(context, bluetoothLeAudio, device);
+                if (result.startsWith("ok")) {
+                    callback.onSuccess();
+                } else {
+                    callback.onError(result);
+                }
+            } catch (Exception e) {
+                callback.onError("shizuku_call_failed: " + e.getMessage());
+            } finally {
+                closeLeAudioProxy();
+            }
+        });
+    }
+
+    /**
      * 使用 HFP 代理连接设备（代理方案）
      * @param device 要连接的蓝牙设备
      * @param callback 连接结果回调
@@ -986,7 +1076,7 @@ public class BluetoothOperationUtils {
             if (bluetoothHeadset != null) {
                 try {
                     Method connectMethod = BluetoothHeadset.class.getMethod("connect", BluetoothDevice.class);
-                    boolean result = (Boolean) connectMethod.invoke(bluetoothHeadset, device);
+                    boolean result = asBoolean(connectMethod.invoke(bluetoothHeadset, device));
                     if (result) {
                         callback.onSuccess();
                     } else {
@@ -1017,7 +1107,7 @@ public class BluetoothOperationUtils {
             if (bluetoothLeAudio != null) {
                 try {
                     Method connectMethod = BluetoothLeAudio.class.getMethod("connect", BluetoothDevice.class);
-                    boolean result = (Boolean) connectMethod.invoke(bluetoothLeAudio, device);
+                    boolean result = asBoolean(connectMethod.invoke(bluetoothLeAudio, device));
                     if (result) {
                         callback.onSuccess();
                     } else {
@@ -1047,7 +1137,7 @@ public class BluetoothOperationUtils {
             if (bluetoothA2dp != null) {
                 try {
                     Method disconnectMethod = BluetoothA2dp.class.getMethod("disconnect", BluetoothDevice.class);
-                    boolean result = (Boolean) disconnectMethod.invoke(bluetoothA2dp, device);
+                    boolean result = asBoolean(disconnectMethod.invoke(bluetoothA2dp, device));
                     if (result) {
                         callback.onSuccess();
                     } else {
@@ -1077,7 +1167,7 @@ public class BluetoothOperationUtils {
             if (bluetoothHeadset != null) {
                 try {
                     Method disconnectMethod = BluetoothHeadset.class.getMethod("disconnect", BluetoothDevice.class);
-                    boolean result = (Boolean) disconnectMethod.invoke(bluetoothHeadset, device);
+                    boolean result = asBoolean(disconnectMethod.invoke(bluetoothHeadset, device));
                     if (result) {
                         callback.onSuccess();
                     } else {
@@ -1108,7 +1198,7 @@ public class BluetoothOperationUtils {
             if (bluetoothLeAudio != null) {
                 try {
                     Method disconnectMethod = BluetoothLeAudio.class.getMethod("disconnect", BluetoothDevice.class);
-                    boolean result = (Boolean) disconnectMethod.invoke(bluetoothLeAudio, device);
+                    boolean result = asBoolean(disconnectMethod.invoke(bluetoothLeAudio, device));
                     if (result) {
                         callback.onSuccess();
                     } else {

@@ -2,14 +2,23 @@ package com.autotest.BTControl;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothHeadset;
 import android.bluetooth.BluetoothProfile;
+import android.companion.AssociationInfo;
+import android.companion.AssociationRequest;
+import android.companion.BluetoothDeviceFilter;
+import android.companion.CompanionDeviceManager;
+import android.content.BroadcastReceiver;
+import android.content.IntentSender;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -26,8 +35,11 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Button;
+import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.IntentSenderRequest;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -42,6 +54,7 @@ import com.autotest.BTControl.adapters.SectionHeaderAdapter;
 import com.autotest.BTControl.utils.BluetoothOperationUtils;
 import com.autotest.BTControl.utils.BluetoothDiscoveryUtils;
 import com.autotest.BTControl.utils.BtctlReporter;
+import com.autotest.BTControl.utils.ShizukuBridge;
 import com.autotest.BTControl.utils.ToastUtils;
 import com.autotest.BTControl.automation.BluetoothAutomationManager;
 
@@ -94,6 +107,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
     // Activity Result API launcher for overlay permission
     private ActivityResultLauncher<Intent> overlayPermissionLauncher;
+    private ActivityResultLauncher<IntentSenderRequest> cdmAssociateLauncher;
 
     // 蓝牙相关
     private BluetoothAdapter bluetoothAdapter;
@@ -148,11 +162,21 @@ public class BluetoothControlActivity extends AppCompatActivity {
     private List<BluetoothDevice> btctlScanDevices;
     /** 本次 adb 请求限定的 profile：all / a2dp / hfp / leaudio */
     private String btctlProfile = "all";
+    private String btctlVia = "native";
     private long btctlStartMs;
 
     // 线程管理
     private ExecutorService executorService;
     private ScheduledExecutorService scheduledExecutorService;
+
+    /** 主线程 Handler，用于「已保存设备」刷新防抖。 */
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    /** 防抖后的刷新动作：多次状态广播合并成一次重建。 */
+    private final Runnable savedDeviceRefreshRunnable = this::updateSavedDeviceList;
+
+    /** 监听连接/配对状态变化的接收器（有它就不用每秒轮询）。 */
+    private BroadcastReceiver savedDeviceStateReceiver;
 
     // ==================== 生命周期方法 ====================
 
@@ -210,6 +234,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
         // 回到前台时刷新状态条：蓝牙/无障碍/profile 可能在别处被改过
         refreshBtctlBar();
+        scheduleSavedDeviceRefresh();
     }
 
     @Override
@@ -271,6 +296,9 @@ public class BluetoothControlActivity extends AppCompatActivity {
         if (discoveryUtils != null) {
             discoveryUtils.cleanup();
         }
+
+        unregisterSavedDeviceStateReceiver();
+        mainHandler.removeCallbacks(savedDeviceRefreshRunnable);
         
         // 取消所有Toast消息
         ToastUtils.cancelCurrentToast();
@@ -318,6 +346,16 @@ public class BluetoothControlActivity extends AppCompatActivity {
                             updateStatus("悬浮窗权限未授予，部分功能可能无法使用");
                         }
                     }
+                }
+        );
+
+        // CDM 关联选择器：系统弹出的「选择要关联的设备」列表，选完才真正建立关联
+        cdmAssociateLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartIntentSenderForResult(),
+                result -> {
+                    boolean associated = hasCdmAssociation(btctlAddr);
+                    Log.d(TAG, "CDM 选择器返回 code=" + result.getResultCode() + " associated=" + associated);
+                    emitBtctlResult(associated, associated ? "" : "associate_cancelled");
                 }
         );
 
@@ -393,23 +431,12 @@ public class BluetoothControlActivity extends AppCompatActivity {
     private void setupRecyclerViews() {
         
         // 已连接设备列表
+        // 已保存设备：整行点击不再进详情页（避免误触），只有右侧箭头进；长按仍是设备操作面板
         SavedDeviceListAdapter = createBluetoothDeviceAdapter(SavedDeviceList,
-            (position, deviceItem) -> {
-                BluetoothDevice device = deviceItem.getBluetoothDevice();
-                if (device != null) {
-                    if (deviceItem.isConnected()) {
-                        disconnectDevice(device);
-                    } else {
-                        connectToDevice(device);
-                    }
-                }
-            },
-            (position, deviceItem) -> {
-                BluetoothDevice device = deviceItem.getBluetoothDevice();
-                if (device != null) {
-                    unpairDevice(device);
-                }
-            });
+            null,
+            (position, deviceItem) -> confirmUnpairDevice(deviceItem));
+        SavedDeviceListAdapter.setOnDetailClickListener(
+            (position, deviceItem) -> DeviceDetailActivity.start(this, deviceItem.getDeviceAddress()));
         
         // NR设备列表（周围设备）
         NRDeviceListAdapter = createBluetoothDeviceAdapter(NRDeviceList,
@@ -624,13 +651,58 @@ public class BluetoothControlActivity extends AppCompatActivity {
      * 启动设备监控
      */
     private void startDeviceMonitoring() {
-        Log.d(TAG, "首次updateSavedDeviceList完成，开始定期监控");
+        Log.d(TAG, "开始监听设备连接状态变化");
         updateSavedDeviceList();
-        // 启动定期检查设备连接状态的任务
-        updateSavedDeviceListWithCallback(() -> {
-            scheduledExecutorService.scheduleWithFixedDelay(this::updateSavedDeviceList,
-                    0, 1, TimeUnit.SECONDS); // 从1秒后开始，每1秒执行一次
-        });
+        registerSavedDeviceStateReceiver();
+    }
+
+    /**
+     * 登记刷新「已保存设备」的防抖回调。
+     *
+     * <p>以前是每秒 scheduleWithFixedDelay 全量重建，副作用有两个：
+     * 一是 ConcatAdapter 每秒 notifyDataSetChanged，行被重建，长按手势会被 cancel（操作面板点不出来）；
+     * 二是每秒 getBondedDevices() + 逐台 getProfileConnectionState()，后台一直在跑。
+     * 现在改成「连接/配对状态广播触发 + 400ms 防抖」，只在真的变了才重建。
+     */
+    private void scheduleSavedDeviceRefresh() {
+        mainHandler.removeCallbacks(savedDeviceRefreshRunnable);
+        mainHandler.postDelayed(savedDeviceRefreshRunnable, 400);
+    }
+
+    /** 订阅会让「已保存设备」状态变化的系统广播。重复调用是安全的。 */
+    private void registerSavedDeviceStateReceiver() {
+        if (savedDeviceStateReceiver != null) {
+            return;
+        }
+        savedDeviceStateReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String action = intent == null ? null : intent.getAction();
+                Log.d(TAG, "设备状态变化: " + action);
+                scheduleSavedDeviceRefresh();
+            }
+        };
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
+        filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        filter.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);
+        filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+        filter.addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
+        registerReceiver(savedDeviceStateReceiver, filter);
+    }
+
+    private void unregisterSavedDeviceStateReceiver() {
+        if (savedDeviceStateReceiver == null) {
+            return;
+        }
+        try {
+            unregisterReceiver(savedDeviceStateReceiver);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "注销设备状态接收器失败", e);
+        } finally {
+            savedDeviceStateReceiver = null;
+        }
     }
 
     // ==================== 权限相关方法 ====================
@@ -846,6 +918,24 @@ public class BluetoothControlActivity extends AppCompatActivity {
             return;
         }
 
+        // CDM 关联：BluetoothDevice.connect() 对普通应用要求「已与本设备建立 CompanionDevice 关联」，
+        // 否则抛 "does not have a CDM association with the Bluetooth Device"。关联一次之后
+        // 整机 connect()/disconnect() 才不会被拦，HFP 也才能由系统侧拉起。
+        if ("关联".equals(targetAction)) {
+            startCdmAssociation(targetDeviceAddress);
+            return;
+        }
+
+        // Shizuku：借 shell(uid 2000) 的身份调 bluetooth_headset，绕开普通应用缺的
+        // MODIFY_PHONE_STATE。显式开关（auto_via=shizuku），不悄悄改默认路径。
+        String requestedVia = intent.getStringExtra("auto_via");
+        btctlVia = (requestedVia == null || requestedVia.trim().isEmpty())
+                ? "native" : requestedVia.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("shizuku".equals(btctlVia)) {
+            runViaShizuku(targetAction, targetDeviceAddress);
+            return;
+        }
+
         String successMsg = "正在执行自动化操作请求: " + targetAction + ", 设备地址: " + targetDeviceAddress;
         showSuccessMessage(successMsg);
         autoAction.set(true);
@@ -874,6 +964,72 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
         // 执行自动化操作（auto_profile 非 all 时只动指定的那个 profile）
         automationManager.executeAutoAction(targetAction, targetDeviceAddress, btctlProfile);
+    }
+
+    /**
+     * 走 Shizuku 代理执行单 profile 的连接/断链。
+     *
+     * <p>需要 shell 身份的两条：HFP 被 {@code MODIFY_PHONE_STATE} 拒，LE Audio 的
+     * {@code BluetoothLeAudio.connect()} 是 @SystemApi、普通反射拿不到。A2DP 本来就能连，
+     * 走 native 就够。
+     */
+    private void runViaShizuku(String action, String address) {
+        boolean hfp = "hfp".equals(btctlProfile);
+        boolean leAudio = "leaudio".equals(btctlProfile);
+        if (!hfp && !leAudio) {
+            emitBtctlResult(false, "shizuku_unsupported: auto_via=shizuku 只支持 --profile hfp|leaudio");
+            return;
+        }
+        if (!"连接".equals(action) && !"断链".equals(action)) {
+            emitBtctlResult(false, "shizuku_unsupported: auto_via=shizuku 只支持 连接/断链");
+            return;
+        }
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter == null || !adapter.isEnabled()) {
+            emitBtctlResult(false, "bluetooth_disabled");
+            return;
+        }
+        BluetoothDevice device;
+        try {
+            device = adapter.getRemoteDevice(address);
+        } catch (IllegalArgumentException e) {
+            emitBtctlResult(false, "invalid_address: " + address);
+            return;
+        }
+        String status = ShizukuBridge.status();
+        if (!"ok".equals(status)) {
+            if ("shizuku_unauthorized".equals(status)) {
+                ShizukuBridge.requestPermission();
+            }
+            emitBtctlResult(false, status);
+            return;
+        }
+        final long startMs = System.currentTimeMillis();
+        BluetoothOperationUtils.OperationCallback cb = new BluetoothOperationUtils.OperationCallback() {
+            @Override
+            public void onSuccess() {
+                runOnUiThread(() -> emitBtctlResult(true, ""));
+            }
+
+            @Override
+            public void onError(String error) {
+                runOnUiThread(() -> emitBtctlResult(false, error));
+            }
+        };
+        if ("连接".equals(action)) {
+            if (hfp) {
+                operationUtils.connectHfpViaShizuku(device, cb);
+            } else {
+                operationUtils.connectLeAudioViaShizuku(device, cb);
+            }
+        } else {
+            if (hfp) {
+                operationUtils.disconnectHfpViaShizuku(device, cb);
+            } else {
+                operationUtils.disconnectLeAudioViaShizuku(device, cb);
+            }
+        }
+        Log.d(TAG, "自动化: shizuku " + action + " profile=" + btctlProfile + " 已发起 t=" + startMs);
     }
 
     /**
@@ -921,6 +1077,151 @@ public class BluetoothControlActivity extends AppCompatActivity {
     }
 
     /**
+     * 发起一次 CompanionDeviceManager 关联（系统会弹确认框，需人工/无障碍点「允许」）。
+     *
+     * <p>关联成功后 {@code BluetoothDevice.connect()} 才会被系统放行；没有关联时它抛
+     * {@code does not have a CDM association with the Bluetooth Device}。
+     */
+    private void startCdmAssociation(final String address) {
+        if (address == null || address.trim().isEmpty()) {
+            emitBtctlResult(false, "missing_device_address");
+            return;
+        }
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            emitBtctlResult(false, "bluetooth_disabled");
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            emitBtctlResult(false, "bluetooth_permission_denied");
+            return;
+        }
+        CompanionDeviceManager cdm = getSystemService(CompanionDeviceManager.class);
+        if (cdm == null) {
+            emitBtctlResult(false, "cdm_unavailable");
+            return;
+        }
+        if (hasCdmAssociation(address)) {
+            emitBtctlResult(true, "already_associated");
+            return;
+        }
+        // 有 Shizuku 就走 shell 按 MAC 建关联：系统选择器只列正在广播的设备，
+        // 已连上的设备不可发现，基本必然选不中。
+        if ("ok".equals(ShizukuBridge.status())) {
+            executorService.execute(() -> {
+                String result = ShizukuBridge.associateCompanionDevice(this, address);
+                runOnUiThread(() -> {
+                    if (result.startsWith("ok")) {
+                        Log.i(TAG, "Shizuku 按 MAC 关联成功: " + address);
+                        emitBtctlResult(true, "shizuku_mac");
+                    } else {
+                        Log.w(TAG, "Shizuku 按 MAC 关联失败，退回选择器: " + result);
+                        launchCdmChooser(address);
+                    }
+                });
+            });
+            return;
+        }
+        launchCdmChooser(address);
+    }
+
+    /** 公开 API 的关联流程：加过滤器，由系统选择器让用户挑设备。 */
+    @SuppressLint("MissingPermission")
+    private void launchCdmChooser(final String address) {
+        CompanionDeviceManager cdm = getSystemService(CompanionDeviceManager.class);
+        if (cdm == null) {
+            emitBtctlResult(false, "cdm_unavailable");
+            return;
+        }
+        final BluetoothDevice device;
+        try {
+            device = bluetoothAdapter.getRemoteDevice(address);
+        } catch (IllegalArgumentException e) {
+            emitBtctlResult(false, "invalid_device_address: " + address);
+            return;
+        }
+        // 注意：AssociationRequest.Builder#addDevice(BluetoothDevice) 是 @SystemApi，普通应用用不了；
+        // 公开 API 只能加过滤器，由系统弹出选择器让用户挑设备（onDeviceFound）。
+        AssociationRequest request = new AssociationRequest.Builder()
+                .addDeviceFilter(new BluetoothDeviceFilter.Builder().build())
+                .setSingleDevice(true)
+                .setDisplayName(device.getName() == null ? "BTControl" : device.getName())
+                .build();
+        CompanionDeviceManager.Callback callback = new CompanionDeviceManager.Callback() {
+            @Override
+            public void onDeviceFound(IntentSender chooserLauncher) {
+                Log.d(TAG, "CDM 关联选择器已弹出");
+                cdmAssociateLauncher.launch(new IntentSenderRequest.Builder(chooserLauncher).build());
+            }
+
+            @Override
+            public void onAssociationCreated(AssociationInfo associationInfo) {
+                String associatedMac = associationInfo.getDeviceMacAddress() == null
+                        ? null : associationInfo.getDeviceMacAddress().toString();
+                if (associatedMac != null && !associatedMac.equalsIgnoreCase(address)) {
+                    Log.w(TAG, "CDM 选择器挑中了别的设备 " + associatedMac + "，撤销");
+                    BtctlReporter.disassociate(BluetoothControlActivity.this, associatedMac);
+                    emitBtctlResult(false, "associate_wrong_device: " + associatedMac);
+                } else {
+                    Log.d(TAG, "CDM 关联成功: " + associationInfo);
+                    emitBtctlResult(true, "");
+                }
+            }
+
+            @Override
+            public void onFailure(CharSequence error) {
+                Log.e(TAG, "CDM 关联失败: " + error);
+                emitBtctlResult(false, "associate_failed: " + error);
+            }
+        };
+        try {
+            cdm.associate(request, callback, null);
+        } catch (Exception e) {
+            Log.e(TAG, "CDM 关联异常", e);
+            emitBtctlResult(false, "associate_error: " + e);
+        }
+    }
+
+    /** 目标设备是否已经与本源建立 CDM 关联（逻辑在 BtctlReporter，界面也要用）。 */
+    private boolean hasCdmAssociation(String address) {
+        return BtctlReporter.hasAssociation(this, address);
+    }
+
+    /**
+     * 长按已保存设备：直接确认「取消配对」。
+     *
+     * <p>CDM 关联入口已经在设备详情页的「CDM 关联」行，长按不再叠一层操作面板。
+     */
+    private void confirmUnpairDevice(BluetoothDeviceAdapter.BluetoothDeviceItem deviceItem) {
+        final BluetoothDevice device = deviceItem.getBluetoothDevice();
+        if (device == null) {
+            return;
+        }
+        @SuppressLint("MissingPermission") final String address = device.getAddress();
+        @SuppressLint("MissingPermission") final String name = device.getName();
+        String title = (name == null || name.isEmpty()) ? address : name;
+        androidx.appcompat.app.AlertDialog dialog = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.详情_取消配对标题)
+                .setMessage(getString(R.string.详情_取消配对正文, title))
+                .setPositiveButton(R.string.详情_取消配对,
+                        (d, which) -> unpairDevice(device))
+                .setNegativeButton(R.string.详情_取消, null)
+                .show();
+        tintDestructiveButton(dialog);
+    }
+
+    /** 危险确认键标红：AlertDialog 的 positive 按钮默认取 colorPrimary。 */
+    void tintDestructiveButton(androidx.appcompat.app.AlertDialog dialog) {
+        if (dialog == null) {
+            return;
+        }
+        Button positive = dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE);
+        if (positive != null) {
+            positive.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.action_destructive));
+        }
+    }
+
+    /**
      * 读 int 型 extra。
      *
      * <p>`am start -e scan_sec 15` 传的是**字符串** extra，直接 getIntExtra 会静默拿到默认值，
@@ -955,12 +1256,21 @@ public class BluetoothControlActivity extends AppCompatActivity {
         // 连接/配对等 CONNECTED，断链等「连不上」，两个方向的等待条件不一样
         boolean expectConnected = !"断链".equals(btctlAction);
         // 最多等 3s：实测 A2DP 从 connect 发出到 CONNECTED 要 ~2.5s，等 2×500ms 会读到旧值
-        if (success && profileAction && btctlProfileTries < 6
+        if (success && profileAction
                 && !BtctlReporter.profileSettled(this, btctlAddr, btctlProfile, expectConnected)) {
-            btctlProfileTries++;
-            Log.d(TAG, "自动化: profile 未刷新，500ms 后重采样(" + btctlProfileTries + ")");
-            new Handler(Looper.getMainLooper()).postDelayed(() -> emitBtctlResult(true, reason), 500);
-            return;
+            if (btctlProfileTries < 6) {
+                btctlProfileTries++;
+                Log.d(TAG, "自动化: profile 未刷新，500ms 后重采样(" + btctlProfileTries + ")");
+                final String pendingReason = reason;
+                new Handler(Looper.getMainLooper()).postDelayed(() -> emitBtctlResult(true, pendingReason), 500);
+                return;
+            }
+            // 代理报成功但 3s 后状态仍没变（比如对端不支持这个 profile）：
+            // 别让 ok=true 骗人，改成可诊断的失败。
+            success = false;
+            reason = "profile_not_connected: " + btctlProfile + " 等 "
+                    + (expectConnected ? "CONNECTED" : "DISCONNECTED") + " 超时";
+            Log.w(TAG, "自动化: " + reason);
         }
         btctlEmitted = true;
         long elapsed = btctlStartMs <= 0 ? 0 : System.currentTimeMillis() - btctlStartMs;
@@ -968,6 +1278,10 @@ public class BluetoothControlActivity extends AppCompatActivity {
         try {
             // 让调用方知道我请求的是「整机」还是某一个 profile
             snapshot.put("profile", btctlProfile);
+            snapshot.put("via", btctlVia);
+            snapshot.put("shizuku", ShizukuBridge.status());
+            // 顺带回一次 CDM 关联状态：没有关联时整机 connect() 必被拒
+            snapshot.put("assoc", hasCdmAssociation(btctlAddr));
         } catch (Throwable ignored) {
             // 少一个字段不影响主结果
         }
@@ -1855,14 +2169,9 @@ public class BluetoothControlActivity extends AppCompatActivity {
         boolean isConnected = connectionInfo.isConnected;
 
         if (isConnected) {
-            statusText = "已连接";
-
-            // 去除profilesBuilder末尾的逗号
-            String profilesStr = connectionInfo.profilesBuilder.toString().trim();
-            if (profilesStr.endsWith(",")) {
-                profilesStr = profilesStr.substring(0, profilesStr.length() - 1);
-            }
-            profilesText = "(" + profilesStr + ")";
+            // 行里只留一个状态点，连接配置（A2DP/HFP/LE Audio）在详情页看
+            statusText = "● 已连接";
+            profilesText = null;
         } else {
             // 未连接设备不显示状态字符串
             statusText = "";

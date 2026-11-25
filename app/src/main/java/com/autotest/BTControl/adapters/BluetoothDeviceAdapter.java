@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothDevice;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -24,6 +25,8 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
     private final List<BluetoothDeviceItem> deviceList;
     private final DeviceClickListener clickListener;
     private final DeviceLongClickListener longClickListener;
+    /** 右侧箭头的监听器：为 null 时不显示箭头（周围设备 / 非常用设备不需要进详情页）。 */
+    private DeviceClickListener detailClickListener;
     
     /**
      * 构造函数
@@ -38,6 +41,11 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
         this.longClickListener = longClickListener;
     }
     
+    /** 给「已保存设备」装上右侧箭头：点箭头进详情页，整行点击不再进。 */
+    public void setOnDetailClickListener(DeviceClickListener listener) {
+        this.detailClickListener = listener;
+    }
+
     @NonNull
     @Override
     public DeviceViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -66,45 +74,23 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
             holder.deviceAddressTextView.setText(deviceItem.getDeviceAddress());
             String deviceStatus = deviceItem.getDeviceStatus();
             
-            // 处理设备状态和配置文件信息
-            String profilesText = deviceItem.getProfilesText();
-            
-            // 合并状态和配置文件信息显示
+            // 行内只显示状态（详情页才有 profile 明细）
             if (deviceStatus != null && !deviceStatus.isEmpty()) {
                 holder.deviceStatusTextView.setVisibility(View.VISIBLE);
-                holder.deviceStatusTextView.setLayoutParams(new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
                 holder.deviceStatusTextView.setText(deviceStatus);
-                
-                // 如果有配置文件信息，显示在同一行
-                if (profilesText != null && !profilesText.trim().isEmpty()) {
-                    holder.deviceProfilesTextView.setVisibility(View.VISIBLE);
-                    holder.deviceProfilesTextView.setLayoutParams(new LinearLayout.LayoutParams(
-                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
-                    holder.deviceProfilesTextView.setText(profilesText);
-                } else {
-                    holder.deviceProfilesTextView.setVisibility(View.GONE);
-                    holder.deviceProfilesTextView.setLayoutParams(new LinearLayout.LayoutParams(
-                        0, 0));
-                }
             } else {
-                // 没有状态信息，只显示配置文件信息（如果有）
                 holder.deviceStatusTextView.setVisibility(View.GONE);
-                holder.deviceStatusTextView.setLayoutParams(new LinearLayout.LayoutParams(
-                    0, 0));
-                
-                if (profilesText != null && !profilesText.trim().isEmpty()) {
-                    holder.deviceProfilesTextView.setVisibility(View.VISIBLE);
-                    holder.deviceProfilesTextView.setLayoutParams(new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-                    holder.deviceProfilesTextView.setText(profilesText);
-                } else {
-                    holder.deviceProfilesTextView.setVisibility(View.GONE);
-                    holder.deviceProfilesTextView.setLayoutParams(new LinearLayout.LayoutParams(
-                        0, 0));
-                }
             }
-            
+            holder.deviceProfilesTextView.setVisibility(View.GONE);
+
+            // 右侧箭头：只有已保存设备才有，且只有它能把用户带进详情页
+            ImageView detailImageView = holder.deviceDetailImageView;
+            detailImageView.setVisibility(detailClickListener != null ? View.VISIBLE : View.GONE);
+            detailImageView.setOnClickListener(detailClickListener == null ? null : v -> {
+                VibrationUtils.performLightVibration(v.getContext());
+                detailClickListener.onDeviceClick(holder.getBindingAdapterPosition(), deviceItem);
+            });
+
             // 设置点击事件
             holder.itemView.setOnClickListener(v -> {
                 // 添加点击震动反馈
@@ -165,6 +151,7 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
         TextView deviceAddressTextView;
         TextView deviceStatusTextView;
         TextView deviceProfilesTextView;
+        ImageView deviceDetailImageView;
         
         public DeviceViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -172,6 +159,7 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
             deviceAddressTextView = itemView.findViewById(R.id.deviceAddressTextView);
             deviceStatusTextView = itemView.findViewById(R.id.deviceStatusTextView);
             deviceProfilesTextView = itemView.findViewById(R.id.deviceProfilesTextView);
+            deviceDetailImageView = itemView.findViewById(R.id.deviceDetailImageView);
         }
     }
     

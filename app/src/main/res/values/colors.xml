@@ -5,8 +5,8 @@
     <color name="colorOnPrimary">#FFFFFF</color> <!-- 白字 -->
 
     <!-- 次色调：活力蓝绿 -->
-    <color name="colorSecondary">#00ACC1</color> <!-- 清新蓝绿 -->
-    <color name="colorSecondaryVariant">#007C91</color> <!-- 稍深蓝绿 -->
+    <color name="colorSecondary">#1E88E5</color> <!-- 亮蓝：开关/进度等强调色 -->
+    <color name="colorSecondaryVariant">#1565C0</color> <!-- 稍深蓝 -->
     <color name="colorOnSecondary">#FFFFFF</color> <!-- 白字 -->
 
     <!-- 背景和字体 -->
@@ -15,7 +15,7 @@
     <color name="background">#FAFAFA</color> <!-- 极浅灰 -->
     <color name="textPrimary">#212121</color> <!-- 深灰黑 -->
     <color name="textSecondary">#757575</color> <!-- 中灰 -->
-    <color name="colorPrimaryDark">#4A148C</color> <!-- 深色主色 -->
+    <color name="colorPrimaryDark">#0D47A1</color> <!-- 状态栏深蓝 -->
 
     <color name="purple_200">#D1C4E9</color> <!-- 紫色200 -->
     <color name="purple_500">#9C27B0</color> <!-- 紫色500 -->
@@ -33,4 +33,13 @@
     <color name="selected_bg_color">#80DEEA</color> <!-- 示例浅蓝色 -->
     <color name="card_stroke_color">#CCCCCC</color> <!-- 浅灰 -->
 
+    <!-- 设备详情页的语义色：绿=已连接/正常，橙=过渡中/待处理，灰=断开/不支持 -->
+    <color name="state_connected">#2E7D32</color>
+    <color name="state_transition">#EF6C00</color>
+    <color name="state_disconnected">#757575</color>
+    <color name="banner_warning_bg">#33FF9800</color>
+
+    <color name="action_destructive">#D32F2F</color> <!-- 破坏性操作（取消配对等） -->
+    <!-- 禁用态按钮文字/描边（夜间比白天略亮，仍明显弱于可用态） -->
+    <color name="button_disabled">#BDBDBD</color>
 </resources>

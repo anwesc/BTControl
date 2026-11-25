@@ -5,15 +5,15 @@
     <color name="colorOnPrimary">#FFFFFF</color> <!-- 白字 -->
 
     <!-- 次色调：低调蓝绿 -->
-    <color name="colorSecondary">#00838F</color> <!-- 深蓝绿 -->
-    <color name="colorSecondaryVariant">#005662</color> <!-- 更深蓝绿 -->
+    <color name="colorSecondary">#64B5F6</color> <!-- 夜间亮蓝：开关/进度等强调色 -->
+    <color name="colorSecondaryVariant">#90CAF9</color> <!-- 夜间次强调蓝 -->
     <color name="colorOnSecondary">#FFFFFF</color> <!-- 白字 -->
 
     <!-- 背景和字体 -->
     <color name="background">#121212</color> <!-- 夜间背景 -->
     <color name="textPrimary">#FFFFFF</color> <!-- 亮白字 -->
     <color name="textSecondary">#B0B0B0</color> <!-- 浅灰辅助字 -->
-    <color name="colorPrimaryDark">#4A148C</color> <!-- 深色主色 -->
+    <color name="colorPrimaryDark">#002171</color> <!-- 夜间状态栏深蓝 -->
 
     <color name="purple_200">#D1C4E9</color> <!-- 紫色200 -->
     <color name="purple_500">#9C27B0</color> <!-- 紫色500 -->
@@ -29,5 +29,12 @@
     <color name="colorUnchecked">#757575</color> <!-- 示例灰色 -->
     <color name="selected_bg_color">#80DEEA</color> <!-- 示例浅蓝色 -->
     <color name="card_stroke_color">#555555</color> <!-- 深灰 -->
+    <color name="surface_night">#1E1E1E</color> <!-- 夜间卡片底（比页面亮一级） -->
+    <color name="state_disconnected">#9E9E9E</color> <!-- 夜间未连接文字（提亮保证对比度） -->
+    <color name="state_connected">#81C784</color> <!-- 夜间已连接绿 -->
+    <color name="state_transition">#FFB74D</color> <!-- 夜间过渡橙 --> <!-- 夜间正常芯片底 --> <!-- 夜间正常芯片字 --> <!-- 夜间警示芯片底 --> <!-- 夜间警示芯片字 --> <!-- 夜间中性芯片底 --> <!-- 夜间中性芯片字 -->
 
+    <color name="action_destructive">#CF6679</color> <!-- 破坏性操作（取消配对等） -->
+    <!-- 禁用态按钮文字/描边（夜间比白天略亮，仍明显弱于可用态） -->
+    <color name="button_disabled">#757575</color>
 </resources>

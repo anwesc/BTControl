@@ -14,17 +14,28 @@
         <item name="android:windowLightStatusBar">false</item> <!-- 白色文字 -->
 
         <!-- 应用主色 -->
-        <item name="colorPrimary">@color/purple_700</item> <!-- 更深的主色-->
-        <item name="colorPrimaryVariant">@color/purple_900</item> <!-- 更深的主色变体-->
+        <item name="colorPrimary">@color/colorPrimary</item> <!-- 更深的主色-->
+        <item name="colorPrimaryVariant">@color/colorPrimaryVariant</item> <!-- 更深的主色变体-->
         <item name="colorOnPrimary">@color/white</item>
 
         <!-- 次级色 -->
-        <item name="colorSecondary">@color/teal_500</item> <!-- 稍微深一点的次级色 -->
-        <item name="colorSecondaryVariant">@color/teal_700</item>
+        <item name="colorSecondary">@color/colorSecondary</item> <!-- 稍微深一点的次级色 -->
+        <item name="colorSecondaryVariant">@color/colorSecondaryVariant</item>
         <item name="colorOnSecondary">@color/white</item> <!-- 白色文字对比深色背景更清晰 -->
 
         <!-- 应用启动背景 -->
-        <item name="android:windowBackground">@color/black</item> <!-- 深色背景 -->
-        <item name="cardBackgroundColor">@color/black</item> <!-- 夜晚是黑色 -->
+        <item name="android:windowBackground">@color/background</item> <!-- 深色背景 #121212 -->
+        <item name="cardBackgroundColor">@color/surface_night</item> <!-- 卡片比页面亮一级，层级看得出来 -->
+
+        <!-- 对话框按钮用强调蓝，避免主色在夜间过暗 -->
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.BTControl.AlertDialog</item>
+        <item name="colorAccent">@color/colorSecondary</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.BTControl.AlertDialog</item>
+    </style>
+
+    <style name="ThemeOverlay.BTControl.AlertDialog" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
+        <item name="colorPrimary">@color/colorSecondary</item>
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/grey_400</item>
     </style>
 </resources>

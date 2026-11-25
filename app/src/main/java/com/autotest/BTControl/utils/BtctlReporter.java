@@ -6,6 +6,8 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
+import android.companion.AssociationInfo;
+import android.companion.CompanionDeviceManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.pm.ResolveInfo;
@@ -209,6 +211,64 @@ public final class BtctlReporter {
      * 所以结果里要带一位 {@code a11y}。先问 AccessibilityManager（准），再兜一次
      * Settings 字符串（MIUI 上 AccessibilityManager 偶尔滞后），两种组件名写法都认。
      */
+    /**
+     * 查某个地址有没有 CompanionDeviceManager 关联。
+     *
+     * <p>没有关联时 {@code BluetoothDevice.connect()} 会被拒（does not have a CDM association），
+     * 所以这个值同时是「整机连接能不能用」的判据。API 33+ 用 getMyAssociations，
+     * 再兜底老接口 getAssociations。
+     */
+    public static boolean hasAssociation(Context ctx, String address) {
+        if (address == null || address.isEmpty()) {
+            return false;
+        }
+        try {
+            CompanionDeviceManager cdm = (CompanionDeviceManager)
+                    ctx.getSystemService(Context.COMPANION_DEVICE_SERVICE);
+            if (cdm == null) {
+                return false;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                for (AssociationInfo info : cdm.getMyAssociations()) {
+                    if (info.getDeviceMacAddress() != null
+                            && address.equalsIgnoreCase(info.getDeviceMacAddress().toString())) {
+                        return true;
+                    }
+                }
+            }
+            for (String mac : cdm.getAssociations()) {
+                if (address.equalsIgnoreCase(mac)) {
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "查询 CDM 关联失败 " + address, t);
+        }
+        return false;
+    }
+
+    /**
+     * 取消某个地址的 CDM 关联，返回是否确实删掉了。
+     */
+    public static boolean disassociate(Context ctx, String address) {
+        if (address == null || address.isEmpty()) {
+            return false;
+        }
+        try {
+            CompanionDeviceManager cdm = (CompanionDeviceManager)
+                    ctx.getSystemService(Context.COMPANION_DEVICE_SERVICE);
+            if (cdm == null) {
+                return false;
+            }
+            // disassociate(AssociationInfo) 不是公开 API，只能用按地址的老接口
+            cdm.disassociate(address);
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "取消 CDM 关联失败 " + address, t);
+            return false;
+        }
+    }
+
     public static boolean isA11yEnabled(Context ctx) {
         try {
             AccessibilityManager am = (AccessibilityManager) ctx.getSystemService(Context.ACCESSIBILITY_SERVICE);

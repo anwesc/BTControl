@@ -448,6 +448,8 @@ public class BluetoothDiscoveryUtils {
             BluetoothDevice device = result.getDevice();
             if (device != null) {
                 int rssi = result.getRssi();
+                // 广播里带了 LE Audio 服务就记一笔，详情页据此决定是否露出这一行
+                LeAudioSupport.observeScanResult(context, result);
                 // 使用统一的设备处理方法
                 handleDiscoveredDevice(device, rssi);
             }
@@ -460,6 +462,7 @@ public class BluetoothDiscoveryUtils {
                 BluetoothDevice device = result.getDevice();
                 if (device != null) {
                     int rssi = result.getRssi();
+                    LeAudioSupport.observeScanResult(context, result);
                     // 使用统一的设备处理方法
                     handleDiscoveredDevice(device, rssi);
                 }

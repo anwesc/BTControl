@@ -37,6 +37,8 @@
 
     <!-- Declare usage of BLE (Bluetooth Low Energy) -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
+    <!-- CDM 关联（CompanionDeviceManager.associate）要求声明该 feature，否则抛 IllegalStateException -->
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false"/>
 
     <application
         android:allowBackup="true"
@@ -83,5 +85,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 设备详情页：列表只留状态，连接配置收进这里 -->
+        <activity
+            android:name=".DeviceDetailActivity"
+            android:exported="false"
+            android:parentActivityName=".BluetoothControlActivity" />
+
+        <!-- Shizuku 授权 provider：借 shell(uid 2000) 身份调 binder，用于 HFP 单 profile 连接 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 </manifest>
