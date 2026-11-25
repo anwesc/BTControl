@@ -779,6 +779,36 @@ public class BluetoothControlActivity extends AppCompatActivity {
      * 于是永远判成「没开」、按钮永远只会跳设置页。现在统一交给
      * {@link BtctlReporter#isA11yEnabled(android.content.Context)} 判定。
      */
+    /**
+     * 自动化预检：这个动作是不是注定要人工介入。
+     *
+     * <p>两条边界是实测出来的：
+     * <ul>
+     *   <li>配对/重新配对必须有人点掉系统的配对确认框，而点框全靠无障碍服务；关着的时候
+     *       只会 30 秒后报「配对超时」，看不出根因。</li>
+     *   <li>关联（CDM）只有走 Shizuku 才能按 MAC 静默完成；没有 Shizuku 就只能人工在
+     *       系统「选择要关联的设备」页里挑，自动化等不到结果。</li>
+     * </ul>
+     *
+     * @return 拦截原因；可以继续执行时返回 null
+     */
+    private String preflightBlocker(String action) {
+        if ("配对".equals(action) || "重新配对".equals(action)) {
+            if (!isAccessibilityServiceEnabled()) {
+                return "needs_a11y: 系统配对框要靠无障碍点掉，现在无障碍服务没开"
+                        + "（设置 → 无障碍 → BTControl 自动化）；也可以先把设备配好再跑动作";
+            }
+        }
+        if ("关联".equals(action)) {
+            String shizukuStatus = com.autotest.BTControl.utils.ShizukuBridge.status();
+            if (!"ok".equals(shizukuStatus)) {
+                return "needs_shizuku: 按 MAC 建 CDM 关联要 Shizuku，当前 shizuku=" + shizukuStatus
+                        + "（详情页连接配置卡的 Shizuku 行里授权）；没有 Shizuku 只能人工在系统选择器里点";
+            }
+        }
+        return null;
+    }
+
     private boolean isAccessibilityServiceEnabled() {
         return BtctlReporter.isA11yEnabled(this);
     }
@@ -917,6 +947,15 @@ public class BluetoothControlActivity extends AppCompatActivity {
         if (targetDeviceAddress == null && requiresDevice(targetAction)) {
             Log.d(TAG, "自动化: 参数不完整 - targetAction=" + targetAction + ", targetDeviceAddress=" + targetDeviceAddress);
             emitBtctlResult(false, "missing_device_address");
+            return;
+        }
+
+        // 预检：有些动作注定要人工介入（点系统弹框 / 授权），先给一条可诊断的失败，
+        // 别让 adb 侧白等 25 秒超时——超时只能说明「没结果」，看不出到底缺什么。
+        String blocker = preflightBlocker(targetAction);
+        if (blocker != null) {
+            Log.w(TAG, "自动化预检拦截: " + blocker);
+            emitBtctlResult(false, blocker);
             return;
         }
 

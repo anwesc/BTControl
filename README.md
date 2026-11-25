@@ -323,12 +323,14 @@ python mist/scripts/board_verify/phone.py ui --grep "开关|已连接|✅"
 `ok=false` 时 `reason` 取值：`missing_device_address`（没给地址也找不到名字；
 **点名了却解析不出来一定报这个，不会静默退化成全局状态**）、
 `bluetooth_permission_denied`、`bluetooth_disabled`、`no_device_found`、`missing bluetooth permission`、
-`unknown_profile`（`auto_profile` 写错）、`profile_not_permitted`（单 profile 调用被系统拒绝，
+`unknown_profile`（`auto_profile` 写错）、`needs_a11y`（`配对`/`重新配对` 前预检：无障碍没开，系统配对框没人点，直接失败而不是等 30 秒超时）、`needs_shizuku`（`关联` 前预检：没 Shizuku 时按 MAC 建关联做不到，只能人工在选择器里点）、`profile_not_permitted`（单 profile 调用被系统拒绝，
 括号里是系统原话）、`profile_api_unavailable`（隐藏 API 反射不到，如 LE Audio）、
 `profile_timeout`（12s 看门狗：代理没回调）、`cdm_unavailable`（系统没有 CDM 服务）、
 `already_associated`（`ok=true`，本来就已经关联过）、`associate_failed: <系统原话>`
 （常见 `user_rejected` = 在选择器里点了取消）、`invalid_device_address`，
 以及动作自身的失败原因（如 `连接超时`、`扫描等待超时`）。
+
+> 上表里「会弹」的动作，app 在动作开始前先做一次预检：`配对`/`重新配对` 检查无障碍（没开直接回 `needs_a11y`）、`关联` 检查 Shizuku（不是 `ok` 直接回 `needs_shizuku`）。这样脚本拿到的是「缺什么」，而不是 25 秒后一条 `timeout`。
 
 ### 各动作会不会弹系统框（3.1.0+，写自动化脚本前先看这张表）
 
