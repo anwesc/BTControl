@@ -94,4 +94,16 @@
     <string name="详情_关联选择器">Shizuku 不可用，改走系统设备选择器</string>
     <string name="详情_关联选择器提示">没有 Shizuku：系统选择器只列正在广播的设备，对端不广播就选不到它</string>
     <string name="详情_关联选择器已连接">对端已连接、不会广播，选择器里多半是别的设备；要按 MAC 关联请装 Shizuku</string>
+    <string name="详情_无障碍整机">整机连接</string>
+    <string name="详情_无障碍整机断开">整机断开</string>
+    <string name="详情_无障碍整机连接中">整机连接中</string>
+    <string name="详情_无障碍整机断开中">整机断开中</string>
+    <string name="详情_无障碍CDM关联">CDM 关联</string>
+    <string name="详情_无障碍CDM取消">CDM 取消关联</string>
+    <string name="详情_无障碍取消配对">取消配对</string>
+    <string name="详情_无障碍Shizuku">Shizuku 授权</string>
+    <string name="详情_无障碍A2DP开关">A2DP 开关</string>
+    <string name="详情_无障碍HFP开关">HFP 开关</string>
+    <string name="详情_无障碍LE开关">LE Audio 开关</string>
+    <string name="详情_无障碍返回">返回</string>
 </resources>

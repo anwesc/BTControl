@@ -303,6 +303,8 @@ public class DeviceDetailActivity extends AppCompatActivity {
     private void bindViews() {
         toolbar = findViewById(R.id.detailToolbar);
         toolbar.setNavigationOnClickListener(v -> finish());
+        // 无障碍/自动化：返回键没有文字，TalkBack 和 uiautomator 都认不出，补一个
+        toolbar.setNavigationContentDescription(R.string.详情_无障碍返回);
         nameTextView = findViewById(R.id.detailNameTextView);
         addressTextView = findViewById(R.id.detailAddressTextView);
         refreshedTextView = findViewById(R.id.detailRefreshedTextView);
@@ -473,6 +475,9 @@ public class DeviceDetailActivity extends AppCompatActivity {
         }
         if (cdmActionButton != null) {
             cdmActionButton.setText(associated ? R.string.详情_取消关联 : R.string.详情_关联CDM);
+            cdmActionButton.setContentDescription(getString(associated
+                    ? R.string.详情_无障碍CDM取消
+                    : R.string.详情_无障碍CDM关联));
         }
 
         refreshedTextView.setText(getString(R.string.详情_最后刷新,
@@ -610,10 +615,15 @@ public class DeviceDetailActivity extends AppCompatActivity {
             wholeActionButton.setText(wholeExpectConnected
                     ? R.string.详情_状态连接中
                     : R.string.详情_状态断开中);
+            wholeActionButton.setContentDescription(getString(wholeExpectConnected
+                    ? R.string.详情_无障碍整机连接中
+                    : R.string.详情_无障碍整机断开中));
         } else if (anyProfileConnected()) {
             wholeActionButton.setText(R.string.详情_断开连接);
+            wholeActionButton.setContentDescription(getString(R.string.详情_无障碍整机断开));
         } else {
             wholeActionButton.setText(R.string.详情_整机连接);
+            wholeActionButton.setContentDescription(getString(R.string.详情_无障碍整机));
         }
     }
 

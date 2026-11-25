@@ -248,6 +248,32 @@ adb shell settings put secure accessibility_enabled 1
 ```
 
 `phone.py btctl` 会自动做这个增量写入（保留其它已启用的无障碍服务）。
+### 界面控件的无障碍标签（3.1.0+，给自动化点按钮用）
+
+`screencap` + 坐标点击一改版就全废，所以详情页的每个可点控件都带了**稳定的 `content-desc`**
+（读屏也靠它），`uiautomator dump` 能直接看到，`phone.py tap <标签>` 就能点：
+
+| 控件 | 标签（content-desc） | 说明 |
+|---|---|---|
+| Toolbar 返回箭头 | `返回` | 没有文字，原来读屏只会读「按钮」 |
+| 概览卡整机按钮 | `整机连接` / `整机断开` / `整机连接中` / `整机断开中` | 按钮**文字**随状态变（连接/断开），标签始终表达当前动作 |
+| 概览卡取消配对 | 文本 `取消配对` | 已有唯一文本，直接用文本点 |
+| A2DP / HFP / LE Audio 开关 | `A2DP 开关` / `HFP 开关` / `LE Audio 开关` | `Switch` 原本只有「开/关」没有名字；行的标签 TextView 还加了 `android:labelFor`，TalkBack 会连读 |
+| Shizuku 行 | `Shizuku 授权` | 点它才出授权/安装引导 |
+| CDM 行按钮 | `CDM 关联` / `CDM 取消关联` | 文本是「关联 CDM / 取消关联」，标签按「功能+动作」统一 |
+
+注意整机按钮的标签**跟随状态**：未连时是「整机连接」、已连时是「整机断开」，所以 `tap 整机连接` 成功本身就代表「点之前确实没连」——标签即断言。`phone.py` 同时匹配按钮文字，`tap 断开` / `tap 连接` 也能点中。
+
+同时状态都是普通文本（`已连接` / `未连接` / `连接中…` / `已授权` / `未运行`），结果行以 `✅` / `⚠️` 开头，可以直接 `phone.py ui --grep 连接中` 断言。
+
+```bash
+# 设备详情页里按标签点，不用记坐标
+python mist/scripts/board_verify/phone.py tap "A2DP 开关"
+python mist/scripts/board_verify/phone.py tap 整机断开
+python mist/scripts/board_verify/phone.py tap "Shizuku 授权"
+python mist/scripts/board_verify/phone.py ui --grep "开关|已连接|✅"
+```
+
 
 ## 直接手动用
 
