@@ -74,7 +74,9 @@
         </service>
 
         <!-- Main launcher activity declaration -->
+        <!-- singleTop：adb 反复 am start 传参时要复用同一个实例，否则多个 Activity 抢扫描 -->
         <activity android:name=".BluetoothControlActivity"
+            android:launchMode="singleTop"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

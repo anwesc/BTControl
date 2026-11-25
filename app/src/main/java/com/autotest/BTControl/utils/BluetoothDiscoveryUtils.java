@@ -34,6 +34,8 @@ public class BluetoothDiscoveryUtils {
     private final Handler mainHandler;
     private DiscoveryCallback callback;
     private final AtomicBoolean isScanning = new AtomicBoolean(false);
+    /** 广播接收器是否已注册：onResume 与 cleanup 都会调注册/注销，重复调必须幂等 */
+    private boolean receiverRegistered;
     private long scanStartTime;
     private static final long TOTAL_SCAN_DURATION = 60000; // 总扫描时间60秒
     private static final long SCAN_DURATION = 2000; // 间隔时间2秒
@@ -118,6 +120,12 @@ public class BluetoothDiscoveryUtils {
     public void registerBluetoothReceiver() {
         Log.d(TAG, "注册蓝牙广播接收器");
 
+        if (receiverRegistered) {
+            // 重复注册会让同一个接收器收到多份 ACTION_FOUND，设备回调翻倍
+            Log.d(TAG, "蓝牙广播接收器已注册，跳过重复注册");
+            return;
+        }
+
         try {
             // 注册广播接收器
             IntentFilter filter = new IntentFilter();
@@ -127,6 +135,7 @@ public class BluetoothDiscoveryUtils {
             filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
             filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
             context.registerReceiver(discoveryReceiver, filter);
+            receiverRegistered = true;
             Log.d(TAG, "已注册蓝牙广播接收器");
         } catch (Exception e) {
             Log.e(TAG, "注册蓝牙广播接收器失败: " + e.getMessage(), e);
@@ -141,12 +150,19 @@ public class BluetoothDiscoveryUtils {
      */
     public void unregisterBluetoothReceiver() {
         Log.d(TAG, "注销蓝牙广播接收器");
-        
+
+        if (!receiverRegistered) {
+            Log.d(TAG, "蓝牙广播接收器未注册，跳过注销");
+            return;
+        }
+
         try {
             context.unregisterReceiver(discoveryReceiver);
             Log.d(TAG, "已注销蓝牙广播接收器");
         } catch (IllegalArgumentException e) {
             Log.w(TAG, "广播接收器未注册或已注销: " + e.getMessage());
+        } finally {
+            receiverRegistered = false;
         }
     }
 
@@ -164,7 +180,10 @@ public class BluetoothDiscoveryUtils {
         }
         
         this.callback = callback;
-        
+
+        // 扫描前自己确保接收器在：只靠 Activity 生命周期注册，一旦暂停就变聋，设备全丢
+        registerBluetoothReceiver();
+
         if (bluetoothAdapter == null) {
             Log.e(TAG, "BluetoothAdapter为null，无法开始设备发现");
             callback.onDiscoveryError("BluetoothAdapter为null");

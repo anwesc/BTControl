@@ -90,9 +90,10 @@ public class BluetoothAutomationManager {
      * @param deviceAddress 设备地址
      */
     public void executeAutoAction(String action, String deviceAddress) {
-        // 如果没有蓝牙权限，则不执行自动化操作
-        if (operationUtils.hasBluetoothPermissions()) {
+        // 没有蓝牙权限就别装作在跑：既不发动作，也要给调用方一个明确失败（否则要到超时才报错）
+        if (!operationUtils.hasBluetoothPermissions()) {
             Log.w(TAG, "executeAutoAction: 缺少蓝牙权限，取消自动化操作");
+            notifyOperationComplete(action, false, "missing bluetooth permission");
             return;
         }
         

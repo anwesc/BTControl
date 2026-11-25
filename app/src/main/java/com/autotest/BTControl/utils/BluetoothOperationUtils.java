@@ -75,21 +75,26 @@ public class BluetoothOperationUtils {
     }
     
     /**
-     * 检查是否有蓝牙权限
+     * 检查蓝牙权限是否齐全
+     *
+     * <p>注意返回语义：<b>true = 已授权</b>。历史版本这里返回的是「缺少权限」，
+     * 与调用方（以及 Activity 里的同名方法）正好相反，已在 3.1.0 修正，
+     * 现在所有调用点统一是 {@code if (!hasBluetoothPermissions()) { 报错; return; }}。
+     *
      * @return 是否有权限（true = 已授权）
      */
     public boolean hasBluetoothPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED;
+            return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED;
+            return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         } else {
-            return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED ||
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED;
+            return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED;
         }
     }
     
@@ -234,7 +239,7 @@ public class BluetoothOperationUtils {
      */
     @SuppressLint("MissingPermission")
     public void pairDevice(BluetoothDevice device, OperationCallback onComplete) {
-        if (hasBluetoothPermissions()) {
+        if (!hasBluetoothPermissions()) {
             if (onComplete != null) {
                 onComplete.onError("没有蓝牙权限");
             }
@@ -327,7 +332,7 @@ public class BluetoothOperationUtils {
     @SuppressLint("MissingPermission")
     public void connectToDevice(BluetoothDevice device, OperationCallback onComplete) {
          // 检查蓝牙权限
-        if (hasBluetoothPermissions()) {
+        if (!hasBluetoothPermissions()) {
              Log.e(TAG, "没有蓝牙权限，无法连接设备");
              if (onComplete != null) {
                  onComplete.onError("没有蓝牙权限");
@@ -533,7 +538,7 @@ public class BluetoothOperationUtils {
     @SuppressLint("MissingPermission")
     public void disconnectDevice(BluetoothDevice device, OperationCallback onComplete) {
          // 检查蓝牙权限
-        if (hasBluetoothPermissions()) {
+        if (!hasBluetoothPermissions()) {
              Log.e(TAG, "没有蓝牙权限，无法断开设备连接");
              if (onComplete != null) {
                  onComplete.onError("没有蓝牙权限");
@@ -729,7 +734,7 @@ public class BluetoothOperationUtils {
      */
     @SuppressLint("MissingPermission")
     public void unpairDevice(BluetoothDevice device, OperationCallback onComplete) {
-        if (hasBluetoothPermissions()) {
+        if (!hasBluetoothPermissions()) {
             if (onComplete != null) {
                 onComplete.onError("没有蓝牙权限");
             }

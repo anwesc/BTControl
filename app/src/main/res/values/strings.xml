@@ -4,10 +4,18 @@
     <string name="无障碍">无障碍</string>
     <string name="已保存设备">已保存设备</string>
     <string name="le_audio">LE Audio</string>
+    <string name="开始扫描">开始扫描</string>
     <string name="停止扫描">停止扫描</string>
+    <string name="展开">展开</string>
+    <string name="收起">收起</string>
+    <string name="非常用设备数量">非常用设备（%1$d）</string>
     <string name="非常用设备">非常用设备</string>
     <string name="周围设备">周围设备</string>
     <string name="等待">......</string>
     <string name="搜索设备">搜索设备</string>
     <string name="清除搜索">清除搜索</string>
+    <string name="btctl_env_placeholder">蓝牙 --  无障碍 --</string>
+    <string name="btctl_result_empty">暂无自动化结果（adb 触发后显示在这里，点一下复制 JSON）</string>
+    <string name="btctl_result_copied">自动化结果 JSON 已复制</string>
+    <string name="btctl_result_no_data">还没有可复制的结果</string>
 </resources>

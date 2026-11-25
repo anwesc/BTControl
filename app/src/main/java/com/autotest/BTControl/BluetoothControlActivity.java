@@ -6,24 +6,25 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Log;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -32,14 +33,19 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.ConcatAdapter;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.autotest.BTControl.adapters.BluetoothDeviceAdapter;
+import com.autotest.BTControl.adapters.SectionHeaderAdapter;
 import com.autotest.BTControl.utils.BluetoothOperationUtils;
 import com.autotest.BTControl.utils.BluetoothDiscoveryUtils;
+import com.autotest.BTControl.utils.BtctlReporter;
 import com.autotest.BTControl.utils.ToastUtils;
 import com.autotest.BTControl.automation.BluetoothAutomationManager;
+
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -71,14 +77,16 @@ public class BluetoothControlActivity extends AppCompatActivity {
 //    private static final int REQUEST_SYSTEM_ALERT_WINDOW_PERMISSION = 105; // replaced by Activity Result API
 
     // UI组件
-    private Button actionButton; // 布局中唯一的按钮，用于扫描/停止扫描
     private TextView statusTextView;
+    private View btctlBar;                   // 底部回执条：只有 adb/脚本触发过动作才出现
+    private TextView btctlResultTextView;    // 回执条文字（点按复制 JSON，长按看环境）
     private ImageView imageAccessibilitySettings; // 无障碍设置按钮
-    private ProgressBar progressBar; // 扫描进度指示器
 
-    private RecyclerView SavedDeviceRecyclerView;
-    private RecyclerView NRDeviceRecyclerView;
-    private RecyclerView NFDeviceRecyclerView;
+    // 整页只有一个列表：三块设备列表靠 ConcatAdapter 拼在一起，标题行也是 item
+    private RecyclerView deviceRecyclerView;
+    private SectionHeaderAdapter savedHeaderAdapter;
+    private SectionHeaderAdapter nearbyHeaderAdapter;
+    private SectionHeaderAdapter nfHeaderAdapter;
     
     // 搜索相关UI组件
     private EditText searchEditText;
@@ -107,9 +115,14 @@ public class BluetoothControlActivity extends AppCompatActivity {
     private final List<BluetoothDeviceAdapter.BluetoothDeviceItem> filteredSavedDeviceList = new ArrayList<>();
     private final List<BluetoothDeviceAdapter.BluetoothDeviceItem> filteredNRDeviceList = new ArrayList<>();
     private final List<BluetoothDeviceAdapter.BluetoothDeviceItem> filteredNFDeviceList = new ArrayList<>();
+
+    // 适配器真正渲染的列表：源列表（Saved/NR/NF）只负责数据，渲染时按搜索与收起状态挑一份
     
     // 搜索状态
     private boolean isSearching = false;
+
+    /** 「非常用设备」默认收起：这类设备多半是没名字的 BLE 广播源，列出来只会把页面撑很长。 */
+    private boolean nfExpanded = false;
     
     // 设备映射 - 只保留与三个列表对应的映射
     private final Map<String, BluetoothDevice> SavedDevicesMap = new HashMap<>();
@@ -124,6 +137,16 @@ public class BluetoothControlActivity extends AppCompatActivity {
     private final AtomicBoolean autoAction = new AtomicBoolean(false);
     private final AtomicBoolean autoScan = new AtomicBoolean(false);
     private final AtomicBoolean isScanning = new AtomicBoolean(false); // 扫描状态
+
+    // 自动化请求上下文（结果上报用）
+    private String btctlReq;
+    private String btctlAction;
+    private String btctlAddr;
+    private boolean btctlFinish;
+    private boolean btctlEmitted;
+    private int btctlProfileTries;
+    private List<BluetoothDevice> btctlScanDevices;
+    private long btctlStartMs;
 
     // 线程管理
     private ExecutorService executorService;
@@ -156,7 +179,23 @@ public class BluetoothControlActivity extends AppCompatActivity {
             startDeviceMonitoring();
             startBluetoothDiscovery();
             processIntentParameters();
+        } else if (getIntent() != null && getIntent().getStringExtra("auto_action") != null) {
+            // 没权限时 processIntentParameters 进不去，这里补一条明确失败，别让调用方干等到超时
+            Intent it = getIntent();
+            btctlReq = it.getStringExtra("req");
+            btctlAction = it.getStringExtra("auto_action");
+            btctlAddr = it.getStringExtra("bluetooth_address");
+            btctlStartMs = System.currentTimeMillis();
+            emitBtctlResult(false, "bluetooth_permission_denied");
         }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // singleTop：复用实例时必须重新走一遍参数处理，否则 adb 第二次请求会被静默忽略
+        setIntent(intent);
+        processIntentParameters();
     }
 
     @Override
@@ -167,21 +206,16 @@ public class BluetoothControlActivity extends AppCompatActivity {
             discoveryUtils.registerBluetoothReceiver();
         }
 
+        // 回到前台时刷新状态条：蓝牙/无障碍/profile 可能在别处被改过
+        refreshBtctlBar();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        
-        // 使用工具类注销蓝牙广播接收器
-        if (discoveryUtils != null) {
-            discoveryUtils.unregisterBluetoothReceiver();
-        }
-        
-        // 使用工具类停止设备扫描
-        if (discoveryUtils != null) {
-            discoveryUtils.stopDiscovery();
-        }
+
+        // 这里刻意不停扫描、也不注销接收器：AI 用 adb 触发扫描时界面经常被切到后台，
+        // 在 onPause 收摊就等于「扫到一半变聋」。收摊统一放到 onDestroy 的 cleanup()。
     }
 
     @Override
@@ -310,28 +344,22 @@ public class BluetoothControlActivity extends AppCompatActivity {
      * 设置UI
      */
     private void setupUI() {
-        // 布局中只有一个Button，ID为actionButton
-        actionButton = findViewById(R.id.actionButton);
         statusTextView = findViewById(R.id.statusTextView);
-        
+        setupBtctlBar();
+
         // 初始化无障碍设置按钮
         imageAccessibilitySettings = findViewById(R.id.image_accessibility_settings);
-        
-        // 初始化进度条
-        progressBar = findViewById(R.id.progressBar);
-        
+
         // 初始化搜索相关UI组件
         searchEditText = findViewById(R.id.searchEditText);
         clearSearchButton = findViewById(R.id.clearSearchButton);
-        
-        // 初始化RecyclerView
-        SavedDeviceRecyclerView = findViewById(R.id.SavedDeviceRecyclerView);
-        NRDeviceRecyclerView = findViewById(R.id.NRDeviceRecyclerView);
-        NFDeviceRecyclerView = findViewById(R.id.NFDeviceRecyclerView);
-        
+
+        // 唯一的设备列表（标题行也在这个列表里）
+        deviceRecyclerView = findViewById(R.id.deviceRecyclerView);
+
         // 设置RecyclerView
         setupRecyclerViews();
-        
+
         // 设置搜索功能
         setupSearchFunctionality();
     }
@@ -340,18 +368,6 @@ public class BluetoothControlActivity extends AppCompatActivity {
      * 设置事件监听器
      */
     private void setupEventListeners() {
-        // 使用布局中唯一的actionButton，设置为扫描功能
-        if (actionButton != null) {
-            actionButton.setOnClickListener(v -> {
-                if (isScanning.get()) {
-                    stopBluetoothDiscovery();
-                } else {
-                    // 点击"开始扫描"按钮仅扫描一次
-                    startBluetoothDiscovery(false);
-                }
-            });
-        }
-        
         // 设置无障碍设置按钮点击事件
         if (imageAccessibilitySettings != null) {
             imageAccessibilitySettings.setOnClickListener(v -> {
@@ -360,7 +376,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
                     // 跳转到无障碍设置页面
                     Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
                     startActivity(intent);
-                    ToastUtils.showLong(this, "请开启BTControl无障碍功能");
+                    ToastUtils.showLong(this, "请开启 BTControl 无障碍功能（组件 com.autotest.BTControl/.MyAccessibilityService；"
+                            + "也可用 adb shell settings put secure enabled_accessibility_services 追加它）");
                 } else {
                     ToastUtils.showShort(this, "BTControl无障碍功能已开启");
                 }
@@ -425,14 +442,99 @@ public class BluetoothControlActivity extends AppCompatActivity {
                 }
             });
         
-        // 设置RecyclerView
-        setupRecyclerView(SavedDeviceRecyclerView, SavedDeviceListAdapter);
-        setupRecyclerView(NRDeviceRecyclerView, NRDeviceListAdapter);
-        setupRecyclerView(NFDeviceRecyclerView, NFDeviceListAdapter);
-        
-        // 初始调整NRDeviceRecyclerView的高度
-        if (NRDeviceRecyclerView != null) {
-            adjustNRDeviceRecyclerViewHeight();
+        // 三块列表 + 三个标题行拼成一个列表：整页只滚这一个 RecyclerView
+        savedHeaderAdapter = new SectionHeaderAdapter(getString(R.string.已保存设备));
+        nearbyHeaderAdapter = new SectionHeaderAdapter(getString(R.string.周围设备))
+                .withAction(getString(R.string.开始扫描), v -> onScanButtonClick());
+        nfHeaderAdapter = new SectionHeaderAdapter(getString(R.string.非常用设备))
+                .withAction(getString(R.string.展开), v -> toggleNfExpanded());
+
+        if (deviceRecyclerView != null) {
+            deviceRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+            deviceRecyclerView.setAdapter(new ConcatAdapter(
+                    savedHeaderAdapter, SavedDeviceListAdapter,
+                    nearbyHeaderAdapter, NRDeviceListAdapter,
+                    nfHeaderAdapter, NFDeviceListAdapter));
+        }
+
+        // 分组为空时把标题行一起收起；「周围设备」常驻，因为它带扫描按钮
+        RecyclerView.AdapterDataObserver sectionVisibilityObserver = new RecyclerView.AdapterDataObserver() {
+            @Override
+            public void onChanged() {
+                refreshSectionVisibility();
+            }
+
+            @Override
+            public void onItemRangeInserted(int positionStart, int itemCount) {
+                refreshSectionVisibility();
+            }
+
+            @Override
+            public void onItemRangeRemoved(int positionStart, int itemCount) {
+                refreshSectionVisibility();
+            }
+        };
+        SavedDeviceListAdapter.registerAdapterDataObserver(sectionVisibilityObserver);
+        NFDeviceListAdapter.registerAdapterDataObserver(sectionVisibilityObserver);
+        refreshSectionVisibility();
+    }
+
+    /** 搜索时强制展开，否则「非常用设备」里的命中项会被收起状态藏掉。 */
+    private boolean isNfVisible() {
+        return nfExpanded || isSearching;
+    }
+
+    private void toggleNfExpanded() {
+        nfExpanded = !nfExpanded;
+        if (isSearching) {
+            updateAdaptersWithFilteredList();
+        } else {
+            updateAdaptersNotFilteredList();
+        }
+    }
+
+    /** 标题里带数量，并同步右侧「展开/收起」按钮。 */
+    private void refreshNfHeader() {
+        if (nfHeaderAdapter == null) {
+            return;
+        }
+        int count = isSearching ? filteredNFDeviceList.size() : NFDeviceList.size();
+        nfHeaderAdapter.setTitle(getString(R.string.非常用设备数量, count));
+        nfHeaderAdapter.setActionText(getString(nfExpanded || isSearching ? R.string.收起 : R.string.展开));
+    }
+
+    /** 列表内容变了就同步标题行显隐，避免出现「已保存设备」下面一片空白。 */
+    private void refreshSectionVisibility() {
+        if (savedHeaderAdapter != null && SavedDeviceListAdapter != null) {
+            savedHeaderAdapter.setVisible(SavedDeviceListAdapter.getItemCount() > 0);
+        }
+        if (nfHeaderAdapter != null) {
+            int nfCount = isSearching ? filteredNFDeviceList.size() : NFDeviceList.size();
+            nfHeaderAdapter.setVisible(nfCount > 0);
+        }
+    }
+
+    /** 扫描按钮：扫描中再点一次就是停。 */
+    private void onScanButtonClick() {
+        if (isScanning.get()) {
+            stopBluetoothDiscovery();
+        } else {
+            // 点击"开始扫描"按钮仅扫描一次
+            startBluetoothDiscovery(false);
+        }
+    }
+
+    /** 扫描按钮文案统一走这里；按钮在列表标题行里，可能存在也可能还没绑定。 */
+    private void setScanButtonText(String text) {
+        if (nearbyHeaderAdapter != null) {
+            nearbyHeaderAdapter.setActionText(text);
+        }
+    }
+
+    /** 扫描进度圈：绑定在「周围设备」标题行上。 */
+    private void setScanProgress(boolean scanning) {
+        if (nearbyHeaderAdapter != null) {
+            nearbyHeaderAdapter.setProgressVisible(scanning);
         }
     }
     
@@ -458,16 +560,6 @@ public class BluetoothControlActivity extends AppCompatActivity {
                 };
         
         return new BluetoothDeviceAdapter(deviceList, defaultClickListener, defaultLongClickListener);
-    }
-    
-    /**
-     * 设置RecyclerView的通用方法
-     */
-    private void setupRecyclerView(RecyclerView recyclerView, BluetoothDeviceAdapter adapter) {
-        if (recyclerView != null) {
-            recyclerView.setLayoutManager(new LinearLayoutManager(this));
-            recyclerView.setAdapter(adapter);
-        }
     }
     
     /**
@@ -604,27 +696,57 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
     /**
      * 检查无障碍服务是否已启用
+     *
+     * <p>历史实现在这里拼了个不存在的组件名
+     * （{@code getPackageName() + "/.automation.BTControlAccessibilityService"}），
+     * 而真实服务是 {@code com.autotest.BTControl/.MyAccessibilityService}，
+     * 于是永远判成「没开」、按钮永远只会跳设置页。现在统一交给
+     * {@link BtctlReporter#isA11yEnabled(android.content.Context)} 判定。
      */
     private boolean isAccessibilityServiceEnabled() {
-        String serviceId = getPackageName() + "/.automation.BTControlAccessibilityService";
-        try {
-            int accessibilityEnabled = Settings.Secure.getInt(
-                getContentResolver(),
-                Settings.Secure.ACCESSIBILITY_ENABLED
-            );
-            
-            if (accessibilityEnabled == 1) {
-                // 检查特定服务是否启用
-                String enabledServices = Settings.Secure.getString(
-                    getContentResolver(),
-                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-                );
-                return enabledServices != null && enabledServices.contains(serviceId);
-            }
-        } catch (Settings.SettingNotFoundException e) {
-            Log.e(TAG, "无法检查无障碍服务状态", e);
+        return BtctlReporter.isA11yEnabled(this);
+    }
+
+    /**
+     * 按设备名在「已配对」列表里找地址。
+     *
+     * <p>调试脚本手里常常只有设备名（DM_Speaker 这类），MAC 还得另找人问。这里先精确
+     * 匹配、再退化成包含匹配（忽略大小写）。找不到或没权限就返回 null，由调用方报
+     * {@code missing_device_address}，不猜。
+     */
+    private String resolveBondedAddressByName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return null;
         }
-        return false;
+        String want = name.trim();
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null || !adapter.isEnabled() || !hasBluetoothPermissions()) {
+                Log.w(TAG, "按名字定位设备: 蓝牙不可用或无权限");
+                return null;
+            }
+            BluetoothDevice fuzzy = null;
+            for (BluetoothDevice d : adapter.getBondedDevices()) {
+                String n = d.getName();
+                if (n == null) {
+                    continue;
+                }
+                if (n.equalsIgnoreCase(want)) {
+                    return d.getAddress();
+                }
+                if (fuzzy == null && n.toLowerCase().contains(want.toLowerCase())) {
+                    fuzzy = d;
+                }
+            }
+            if (fuzzy == null) {
+                Log.w(TAG, "按名字定位设备: 已配对列表里没有 " + want);
+                return null;
+            }
+            return fuzzy.getAddress();
+        } catch (Throwable t) {
+            Log.w(TAG, "按名字定位设备失败: " + t);
+            return null;
+        }
     }
 
     // ==================== 自动化操作方法 ====================
@@ -637,70 +759,284 @@ public class BluetoothControlActivity extends AppCompatActivity {
         Intent intent = getIntent();
         Log.d(TAG, "自动化: 开始处理Intent参数");
 
-        if (intent != null) {
-            // 打印所有Extras
-            Bundle extras = intent.getExtras();
-            if (extras != null) {
-                Log.d(TAG, "自动化: Intent包含以下Extras:");
-                for (String key : extras.keySet()) {
-                    Object value = extras.getString(key);
-                    Log.d(TAG, "自动化: Key=" + key + ", Value=" + value);
-                }
-            } else {
-                Log.d(TAG, "自动化: Intent没有Extras");
-            }
+        if (intent == null) {
+            Log.d(TAG, "自动化: Intent为null");
+            return;
+        }
 
-            // 自动化执行相关
-            String targetAction = intent.getStringExtra("auto_action");
-            Log.d(TAG, "自动化: targetAction=" + targetAction);
-
-            // 支持两种参数名：device_address 和 bluetooth_address
-            String targetDeviceAddress = intent.getStringExtra("device_address");
-            if (targetDeviceAddress == null) {
-                targetDeviceAddress = intent.getStringExtra("bluetooth_address");
-            }
-
-            if (targetAction != null && targetDeviceAddress != null) {
-                String successMsg = "正在执行自动化操作请求: " + targetAction + ", 设备地址: " + targetDeviceAddress;
-                showSuccessMessage(successMsg);
-                autoAction.set(true);
-
-                // 设置状态监听器
-                automationManager.setStatusListener(new BluetoothAutomationManager.AutomationStatusListener() {
-
-                    @Override
-                    public void onOperationComplete(String action, boolean success, String message) {
-                        runOnUiThread(() -> {
-                            if (success) {
-                                updateStatus("自动化操作完成: " + action);
-                            } else {
-                                updateStatus("自动化操作失败: " + action + " - " + message);
-                            }
-                            autoAction.set(false);
-                        });
-                    }
-
-                    @Override
-                    public void onDeviceDiscovered(BluetoothDevice device) {
-                        runOnUiThread(() -> updateStatus("自动化发现设备: " + device.getName()));
-                    }
-                });
-
-                // 执行自动化操作
-                automationManager.executeAutoAction(targetAction, targetDeviceAddress);
-            } else {
-                Log.d(TAG, "自动化: 参数不完整 - targetAction=" + targetAction + ", targetDeviceAddress=" + targetDeviceAddress);
+        // 打印所有Extras
+        Bundle extras = intent.getExtras();
+        if (extras != null) {
+            Log.d(TAG, "自动化: Intent包含以下Extras:");
+            for (String key : extras.keySet()) {
+                Object value = extras.getString(key);
+                Log.d(TAG, "自动化: Key=" + key + ", Value=" + value);
             }
         } else {
-            Log.d(TAG, "自动化: Intent为null");
+            Log.d(TAG, "自动化: Intent没有Extras");
         }
+
+        // 自动化执行相关
+        String targetAction = intent.getStringExtra("auto_action");
+        Log.d(TAG, "自动化: targetAction=" + targetAction);
+        if (targetAction == null) {
+            return;
+        }
+
+        // 支持两种参数名：device_address 和 bluetooth_address
+        String targetDeviceAddress = intent.getStringExtra("device_address");
+        if (targetDeviceAddress == null) {
+            targetDeviceAddress = intent.getStringExtra("bluetooth_address");
+        }
+        String requestedName = intent.getStringExtra("auto_name");
+        // 调用方到底有没有「点名」某台设备：地址或名字给了任意一个就算。
+        // 点名了但解析不出来，绝不能静默退化成「全局状态」——AI 会以为查的就是它。
+        boolean deviceRequested = (targetDeviceAddress != null && !targetDeviceAddress.trim().isEmpty())
+                || (requestedName != null && !requestedName.trim().isEmpty());
+        // 只有设备名、没有 MAC 时，按名字在已配对列表里定位（AI 侧通常只知道名字）
+        if (targetDeviceAddress == null || targetDeviceAddress.trim().isEmpty()) {
+            targetDeviceAddress = resolveBondedAddressByName(requestedName);
+        }
+
+        // 结果上报上下文：req 原样回显，调用方用它对齐自己那一次请求
+        btctlReq = intent.getStringExtra("req");
+        btctlAction = targetAction;
+        btctlAddr = targetDeviceAddress;
+        btctlFinish = intent.getBooleanExtra("finish", false) || intent.getBooleanExtra("finish_after", false);
+        btctlEmitted = false;
+        btctlProfileTries = 0;
+        btctlScanDevices = null;
+        btctlStartMs = System.currentTimeMillis();
+
+        if (deviceRequested && (targetDeviceAddress == null || targetDeviceAddress.trim().isEmpty())) {
+            Log.d(TAG, "自动化: 设备标识无法解析 auto_name=" + requestedName
+                    + ", address=" + intent.getStringExtra("device_address"));
+            emitBtctlResult(false, "missing_device_address");
+            return;
+        }
+
+
+        // 只读状态查询：不改状态、不等动作，立刻返回，AI 先用它探路
+        if ("state".equals(targetAction)) {
+            emitBtctlResult(true, "");
+            return;
+        }
+
+        // 扫描但没给目标设备：按「列表扫描」跑，扫 scan_sec 秒把发现的设备一起报回来。
+        // 原来的扫描语义是「一直扫到指定设备出现」，AI 手里没有目标设备时根本没法用。
+        if ("扫描".equals(targetAction) && targetDeviceAddress == null) {
+            runScanList(parseIntExtra(intent.getStringExtra("scan_sec"), 12));
+            return;
+        }
+
+        if (targetDeviceAddress == null && requiresDevice(targetAction)) {
+            Log.d(TAG, "自动化: 参数不完整 - targetAction=" + targetAction + ", targetDeviceAddress=" + targetDeviceAddress);
+            emitBtctlResult(false, "missing_device_address");
+            return;
+        }
+
+        String successMsg = "正在执行自动化操作请求: " + targetAction + ", 设备地址: " + targetDeviceAddress;
+        showSuccessMessage(successMsg);
+        autoAction.set(true);
+
+        // 设置状态监听器
+        automationManager.setStatusListener(new BluetoothAutomationManager.AutomationStatusListener() {
+
+            @Override
+            public void onOperationComplete(String action, boolean success, String message) {
+                runOnUiThread(() -> {
+                    if (success) {
+                        updateStatus("自动化操作完成: " + action);
+                    } else {
+                        updateStatus("自动化操作失败: " + action + " - " + message);
+                    }
+                    autoAction.set(false);
+                    emitBtctlResult(success, message);
+                });
+            }
+
+            @Override
+            public void onDeviceDiscovered(BluetoothDevice device) {
+                runOnUiThread(() -> updateStatus("自动化发现设备: " + device.getName()));
+            }
+        });
+
+        // 执行自动化操作
+        automationManager.executeAutoAction(targetAction, targetDeviceAddress);
+    }
+
+    /**
+     * 列表扫描：不针对某台设备，扫 scanSec 秒后把期间发现的设备一起上报。
+     *
+     * <p>结果里带 {@code devices:[{name,addr,bond}]}，没扫到设备时 ok=false、
+     * reason=no_device_found —— AI 至少能分清「扫到了什么」和「一台都没有」。
+     */
+    private void runScanList(final int scanSec) {
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            emitBtctlResult(false, "bluetooth_disabled");
+            return;
+        }
+        startBluetoothDiscovery(false);
+        executorService.execute(() -> {
+            try {
+                Thread.sleep(Math.max(3, scanSec) * 1000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            List<BluetoothDevice> found = new ArrayList<>();
+            synchronized (NRDevicesMap) {
+                found.addAll(NRDevicesMap.values());
+            }
+            synchronized (NFDevicesMap) {
+                found.addAll(NFDevicesMap.values());
+            }
+            // 停扫描会动 UI（改按钮文案、隐藏进度条），必须回主线程，别在工作线程里调
+            runOnUiThread(() -> {
+                stopBluetoothDiscovery();
+                btctlScanDevices = found;
+                emitBtctlResult(!found.isEmpty(), found.isEmpty() ? "no_device_found" : "");
+            });
+        });
+    }
+
+    /**
+     * 该动作是否需要目标设备地址。
+     *
+     * <p>扫描与状态查询本身就不针对某台设备，早期实现一律要求地址，导致
+     * {@code am start ... -e auto_action 扫描} 直接回报 {@code missing_device_address}。
+     */
+    private static boolean requiresDevice(String action) {
+        return !("扫描".equals(action) || "state".equals(action));
+    }
+
+    /**
+     * 读 int 型 extra。
+     *
+     * <p>`am start -e scan_sec 15` 传的是**字符串** extra，直接 getIntExtra 会静默拿到默认值，
+     * 之前 scan_sec 一直生效不了就是这个原因。
+     */
+    private static int parseIntExtra(String raw, int fallback) {
+        if (raw == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            Log.w(TAG, "int extra 解析失败: " + raw + "，回退到 " + fallback);
+            return fallback;
+        }
+    }
+
+    /**
+     * 自动化结果上报：一行 logcat（tag=BTCTL）+ 一份 JSON 文件兜底。
+     *
+     * <p>同一次请求只报一次：扫描超时时底层会先报一次失败，动作线程结束时又会报一次。
+     */
+    private void emitBtctlResult(boolean success, String reason) {
+        if (btctlEmitted) {
+            return;
+        }
+        // 连接类动作返回时 profile 状态往往还没刷新（A2DP 的 STATE_CONNECTED 是异步广播），
+        // 立刻采样会出现 ok=true 但 a2dp=UNKNOWN，AI 会误判成「连上了却没走音频」。
+        // 这里最多再等两次（每次 500ms）让快照读到 CONNECTED。
+        boolean profileAction = "连接".equals(btctlAction) || "配对".equals(btctlAction)
+                || "重新配对".equals(btctlAction);
+        if (success && profileAction && btctlProfileTries < 2
+                && BtctlReporter.profilesPending(this, btctlAddr)) {
+            btctlProfileTries++;
+            Log.d(TAG, "自动化: profile 未刷新，500ms 后重采样(" + btctlProfileTries + ")");
+            new Handler(Looper.getMainLooper()).postDelayed(() -> emitBtctlResult(true, reason), 500);
+            return;
+        }
+        btctlEmitted = true;
+        long elapsed = btctlStartMs <= 0 ? 0 : System.currentTimeMillis() - btctlStartMs;
+        JSONObject snapshot = BtctlReporter.snapshot(this, btctlReq, btctlAction, btctlAddr, success, reason, elapsed);
+        if (btctlScanDevices != null) {
+            try {
+                snapshot.put("devices", BtctlReporter.devicesJson(btctlScanDevices));
+            } catch (Throwable ignored) {
+                // 设备列表塞不进去也不影响主结果
+            }
+        }
+        BtctlReporter.emit(this, snapshot);
+        runOnUiThread(this::refreshBtctlBar);
+        if (btctlFinish) {
+            Log.d(TAG, "自动化: 按请求结束界面");
+            finishAndRemoveTask();
+        }
+    }
+
+    /** 绑定顶部状态条：环境一行、最近结果一行，点结果行复制 JSON。 */
+    private void setupBtctlBar() {
+        btctlBar = findViewById(R.id.btctlBar);
+        btctlResultTextView = findViewById(R.id.btctlResultTextView);
+        if (btctlResultTextView != null) {
+            btctlResultTextView.setOnClickListener(v -> copyLastResult());
+            // 长按看环境详情：蓝牙/无障碍/profile，不用它时完全不占屏幕
+            btctlResultTextView.setOnLongClickListener(v -> {
+                showEnvDialog();
+                return true;
+            });
+        }
+    }
+
+    /** 刷新底部回执条：没触发过自动化就一直藏着，别占用户首屏。 */
+    private void refreshBtctlBar() {
+        if (btctlResultTextView == null || btctlBar == null) {
+            return;
+        }
+        JSONObject last = BtctlReporter.lastJson;
+        if (last == null) {
+            btctlBar.setVisibility(View.GONE);
+            return;
+        }
+        boolean ok = last.optBoolean("ok", false);
+        String reason = last.optString("reason", "");
+        StringBuilder sb = new StringBuilder();
+        sb.append(ok ? "✅ " : "⚠️ ").append(last.optString("action", "?"));
+        sb.append("  ").append(last.optLong("elapsed_ms", 0)).append("ms");
+        if (!reason.isEmpty()) {
+            sb.append("  ").append(reason);
+        }
+        String addr = last.optString("addr", "");
+        if (!addr.isEmpty()) {
+            sb.append("  ").append(addr);
+        }
+        sb.append("   · 点按复制");
+        btctlResultTextView.setText(sb.toString());
+        btctlResultTextView.setTextColor(getColor(ok ? R.color.grey_700 : android.R.color.holo_red_dark));
+        btctlBar.setVisibility(View.VISIBLE);
+    }
+
+    /** 环境摘要（蓝牙开关/无障碍/各 profile 状态）弹窗，平时不占界面。 */
+    private void showEnvDialog() {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("运行环境")
+                .setMessage(BtctlReporter.envLine(this))
+                .setPositiveButton("复制 JSON", (d, which) -> copyLastResult())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** 把最近一次结果 JSON 复制到剪贴板，方便人调试时直接贴给 AI。 */
+    private void copyLastResult() {
+        JSONObject last = BtctlReporter.lastJson;
+        if (last == null) {
+            ToastUtils.showShort(this, getString(R.string.btctl_result_no_data));
+            return;
+        }
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm == null) {
+            return;
+        }
+        cm.setPrimaryClip(ClipData.newPlainText("BTCTL RESULT", last.toString()));
+        ToastUtils.showShort(this, getString(R.string.btctl_result_copied));
     }
 
     /**
      * 停止自动化操作
      */
-    private void stopAutomation() {
-        autoAction.set(false);
+    private void stopAutomation() {        autoAction.set(false);
         autoScan.set(false);
         
         // 使用BluetoothAutomationManager停止自动化操作
@@ -933,18 +1269,16 @@ public class BluetoothControlActivity extends AppCompatActivity {
         NRDeviceList.clear();
         NFDevicesMap.clear();
         NFDeviceList.clear();
-        adjustNRDeviceRecyclerViewHeight();
         
         // 清空过滤列表
         filteredNRDeviceList.clear();
         filteredNFDeviceList.clear();
 
         // 更新适配器
-        NRDeviceListAdapter.notifyDataSetChanged();
-        NFDeviceListAdapter.notifyDataSetChanged();
+        renderDeviceLists();
 
-        actionButton.setText("停止扫描");
-        progressBar.setVisibility(View.VISIBLE);
+        setScanButtonText("停止扫描");
+        setScanProgress(true);
         isScanning.set(true);
 
         Log.d(TAG, "调用discoveryUtils.startDiscovery()开始扫描蓝牙设备，扫描模式: " + (continuousScan ? "连续扫描" : "单次扫描"));
@@ -956,8 +1290,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     Log.d(TAG, "蓝牙设备发现已启动 (" + (continuousScan ? "连续扫描" : "单次扫描") + ")");
                     isScanning.set(true);
-                    actionButton.setText("停止扫描");
-                    progressBar.setVisibility(View.VISIBLE);
+                    setScanButtonText("停止扫描");
+                    setScanProgress(true);
                     addStatusMessage("开始扫描蓝牙设备 (" + (continuousScan ? "连续扫描" : "单次扫描") + ")");
                 });
             }
@@ -1013,21 +1347,15 @@ public class BluetoothControlActivity extends AppCompatActivity {
                     Log.w(TAG, "onDeviceFound: 设备为null");
                 }
                 // 在UI线程中更新设备列表
-                runOnUiThread(() -> {
-                    // 通知NR设备列表适配器更新
-                    NRDeviceListAdapter.notifyDataSetChanged();
-                    adjustNRDeviceRecyclerViewHeight();
-                    // 通知NF设备列表适配器更新
-                    NFDeviceListAdapter.notifyDataSetChanged();
-                });
+                runOnUiThread(BluetoothControlActivity.this::renderDeviceLists);
             }
             
             @Override
             public void onDiscoveryFinished() {
                 runOnUiThread(() -> {
                     showSuccessMessage("设备扫描完成");
-                    actionButton.setText("开始扫描");
-                    progressBar.setVisibility(View.GONE);
+                    setScanButtonText("开始扫描");
+                    setScanProgress(false);
                     isScanning.set(false);
                 });
             }
@@ -1036,8 +1364,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
             public void onDiscoveryError(String error) {
                 runOnUiThread(() -> {
                     updateStatus("设备扫描错误: " + error);
-                    actionButton.setText("开始扫描");
-                    progressBar.setVisibility(View.GONE);
+                    setScanButtonText("开始扫描");
+                    setScanProgress(false);
                     isScanning.set(false);
                 });
             }
@@ -1100,8 +1428,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
         
         updateStatus("停止扫描蓝牙设备...");
 
-        actionButton.setText("开始扫描");
-        progressBar.setVisibility(View.GONE);
+        setScanButtonText("开始扫描");
+        setScanProgress(false);
 
         // 使用工具类停止扫描蓝牙设备
         discoveryUtils.stopDiscovery();
@@ -1151,14 +1479,9 @@ public class BluetoothControlActivity extends AppCompatActivity {
         boolean finalRemovedFromNR = removedFromNR;
         boolean finalRemovedFromNF = removedFromNF;
         runOnUiThread(() -> {
-            if (finalRemovedFromNR) {
-                NRDeviceListAdapter.notifyDataSetChanged();
+            if (finalRemovedFromNR || finalRemovedFromNF) {
+                renderDeviceLists();
             }
-            if (finalRemovedFromNF) {
-                NFDeviceListAdapter.notifyDataSetChanged();
-            }
-            // 调整NR设备列表高度
-            adjustNRDeviceRecyclerViewHeight();
         });
         
         Log.d(TAG, "removeDeviceFromDiscoveryLists: 设备 " + deviceAddress + 
@@ -1209,7 +1532,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
                     SavedDevicesMap.clear();
                     SavedDeviceList.addAll(tempSavedDeviceList);
                     SavedDevicesMap.putAll(tempSavedDevicesMap);
-                    SavedDeviceListAdapter.notifyDataSetChanged();
+                    renderDeviceLists();
                 });
             } catch (Exception e) {
                 Log.e(TAG, "updateSavedDeviceList: 后台任务异常", e);
@@ -1265,7 +1588,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
                     SavedDevicesMap.clear();
                     SavedDeviceList.addAll(tempSavedDeviceList);
                     SavedDevicesMap.putAll(tempSavedDevicesMap);
-                    SavedDeviceListAdapter.notifyDataSetChanged();
+                    renderDeviceLists();
 
                     // 执行回调
                     if (onComplete != null) {
@@ -1360,72 +1683,37 @@ public class BluetoothControlActivity extends AppCompatActivity {
      * 使用过滤后的列表更新适配器
      */
     private void updateAdaptersWithFilteredList() {
-        if (SavedDeviceListAdapter != null) {
-            SavedDeviceListAdapter.updateDeviceList(filteredSavedDeviceList);
-        }
-        
-        if (NRDeviceListAdapter != null) {
-            NRDeviceListAdapter.updateDeviceList(filteredNRDeviceList);
-            adjustNRDeviceRecyclerViewHeight();
-        }
-        
-        if (NFDeviceListAdapter != null) {
-            NFDeviceListAdapter.updateDeviceList(filteredNFDeviceList);
-        }
+        renderDeviceLists();
     }
 
     /**
      * 取消过滤后的列表更新适配器
      */
     private void updateAdaptersNotFilteredList() {
-        if (SavedDeviceListAdapter != null) {
-            SavedDeviceListAdapter.updateDeviceList(SavedDeviceList);
-        }
-
-        if (NRDeviceListAdapter != null) {
-            NRDeviceListAdapter.updateDeviceList(NRDeviceList);
-            adjustNRDeviceRecyclerViewHeight();
-        }
-
-        if (NFDeviceListAdapter != null) {
-            NFDeviceListAdapter.updateDeviceList(NFDeviceList);
-        }
+        renderDeviceLists();
     }
 
     /**
-     * 动态调整NRDeviceRecyclerView的高度
+     * 三块列表唯一的渲染入口：按搜索状态与「非常用设备」收起状态决定各自展示哪份数据。
+     * 适配器渲染的是 display 列表，源列表（Saved/NR/NF）不直接被 UI 引用，收起才收得掉。
      */
-    private void adjustNRDeviceRecyclerViewHeight() {
-        if (NRDeviceRecyclerView == null || NRDeviceListAdapter == null) {
+    private void renderDeviceLists() {
+        if (SavedDeviceListAdapter == null || NRDeviceListAdapter == null || NFDeviceListAdapter == null) {
             return;
         }
-        
-        // 在UI线程中执行
-        runOnUiThread(() -> {
-            // 测量RecyclerView的内容高度
-            NRDeviceRecyclerView.measure(
-                View.MeasureSpec.makeMeasureSpec(NRDeviceRecyclerView.getWidth(), View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-            );
-            
-            int contentHeight = NRDeviceRecyclerView.getMeasuredHeight();
-            
-            // 将360dp转换为像素
-            float density = getResources().getDisplayMetrics().density;
-            int maxHeightPixels = (int) (360 * density);
-            
-            // 根据内容高度设置RecyclerView的高度
-            ViewGroup.LayoutParams layoutParams = NRDeviceRecyclerView.getLayoutParams();
-            if (contentHeight > maxHeightPixels) {
-                // 如果内容高度超过360dp，固定高度为360dp
-                layoutParams.height = maxHeightPixels;
-            } else {
-                // 否则使用wrap_content
-                layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
-            }
-            
-            NRDeviceRecyclerView.setLayoutParams(layoutParams);
-        });
+        // 传副本：适配器的 updateDeviceList 是 clear + addAll 自身列表，传同一个对象会先清空再拷空
+        SavedDeviceListAdapter.updateDeviceList(
+                new ArrayList<>(isSearching ? filteredSavedDeviceList : SavedDeviceList));
+        NRDeviceListAdapter.updateDeviceList(
+                new ArrayList<>(isSearching ? filteredNRDeviceList : NRDeviceList));
+        if (isNfVisible()) {
+            NFDeviceListAdapter.updateDeviceList(
+                    new ArrayList<>(isSearching ? filteredNFDeviceList : NFDeviceList));
+        } else {
+            NFDeviceListAdapter.updateDeviceList(new ArrayList<>());
+        }
+        refreshSectionVisibility();
+        refreshNfHeader();
     }
 
     // ==================== 辅助工具方法 ====================
