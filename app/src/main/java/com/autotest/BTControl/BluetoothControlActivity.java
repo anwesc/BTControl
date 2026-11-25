@@ -146,6 +146,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
     private boolean btctlEmitted;
     private int btctlProfileTries;
     private List<BluetoothDevice> btctlScanDevices;
+    /** 本次 adb 请求限定的 profile：all / a2dp / hfp / leaudio */
+    private String btctlProfile = "all";
     private long btctlStartMs;
 
     // 线程管理
@@ -803,6 +805,15 @@ public class BluetoothControlActivity extends AppCompatActivity {
         btctlAction = targetAction;
         btctlAddr = targetDeviceAddress;
         btctlFinish = intent.getBooleanExtra("finish", false) || intent.getBooleanExtra("finish_after", false);
+        String requestedProfile = intent.getStringExtra("auto_profile");
+        btctlProfile = (requestedProfile == null || requestedProfile.trim().isEmpty())
+                ? "all" : requestedProfile.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!"all".equals(btctlProfile) && !"a2dp".equals(btctlProfile)
+                && !"hfp".equals(btctlProfile) && !"leaudio".equals(btctlProfile)) {
+            Log.d(TAG, "自动化: 未知 profile " + requestedProfile);
+            emitBtctlResult(false, "unknown_profile: " + requestedProfile + "（可用 a2dp/hfp/leaudio/all）");
+            return;
+        }
         btctlEmitted = false;
         btctlProfileTries = 0;
         btctlScanDevices = null;
@@ -861,8 +872,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
             }
         });
 
-        // 执行自动化操作
-        automationManager.executeAutoAction(targetAction, targetDeviceAddress);
+        // 执行自动化操作（auto_profile 非 all 时只动指定的那个 profile）
+        automationManager.executeAutoAction(targetAction, targetDeviceAddress, btctlProfile);
     }
 
     /**
@@ -940,9 +951,12 @@ public class BluetoothControlActivity extends AppCompatActivity {
         // 立刻采样会出现 ok=true 但 a2dp=UNKNOWN，AI 会误判成「连上了却没走音频」。
         // 这里最多再等两次（每次 500ms）让快照读到 CONNECTED。
         boolean profileAction = "连接".equals(btctlAction) || "配对".equals(btctlAction)
-                || "重新配对".equals(btctlAction);
-        if (success && profileAction && btctlProfileTries < 2
-                && BtctlReporter.profilesPending(this, btctlAddr)) {
+                || "重新配对".equals(btctlAction) || "断链".equals(btctlAction);
+        // 连接/配对等 CONNECTED，断链等「连不上」，两个方向的等待条件不一样
+        boolean expectConnected = !"断链".equals(btctlAction);
+        // 最多等 3s：实测 A2DP 从 connect 发出到 CONNECTED 要 ~2.5s，等 2×500ms 会读到旧值
+        if (success && profileAction && btctlProfileTries < 6
+                && !BtctlReporter.profileSettled(this, btctlAddr, btctlProfile, expectConnected)) {
             btctlProfileTries++;
             Log.d(TAG, "自动化: profile 未刷新，500ms 后重采样(" + btctlProfileTries + ")");
             new Handler(Looper.getMainLooper()).postDelayed(() -> emitBtctlResult(true, reason), 500);
@@ -951,6 +965,21 @@ public class BluetoothControlActivity extends AppCompatActivity {
         btctlEmitted = true;
         long elapsed = btctlStartMs <= 0 ? 0 : System.currentTimeMillis() - btctlStartMs;
         JSONObject snapshot = BtctlReporter.snapshot(this, btctlReq, btctlAction, btctlAddr, success, reason, elapsed);
+        try {
+            // 让调用方知道我请求的是「整机」还是某一个 profile
+            snapshot.put("profile", btctlProfile);
+        } catch (Throwable ignored) {
+            // 少一个字段不影响主结果
+        }
+        java.util.List<String> warnings = automationManager.getLastWarnings();
+        if (warnings != null && !warnings.isEmpty()) {
+            try {
+                // 整机动作里某个 profile 被拒（典型：HFP 缺 MODIFY_PHONE_STATE），ok 可能是 true，但要如实列出来
+                snapshot.put("warnings", new org.json.JSONArray(warnings));
+            } catch (Throwable ignored) {
+                // 附加上下文失败不影响主结果
+            }
+        }
         if (btctlScanDevices != null) {
             try {
                 snapshot.put("devices", BtctlReporter.devicesJson(btctlScanDevices));

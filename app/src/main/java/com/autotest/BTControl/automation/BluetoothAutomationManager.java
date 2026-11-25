@@ -31,6 +31,13 @@ public class BluetoothAutomationManager {
      private final ExecutorService executorService;
      private final ScheduledExecutorService scheduledExecutorService;
 
+    // 本次请求只作用于哪个 profile（a2dp/hfp/leaudio/all，默认 all 表示整机动作）
+    private volatile String requestedProfile = "all";
+    // 最近一次 profile 级动作的失败原因，用于把 SecurityException 之类如实回报给 adb
+    private volatile String lastError;
+    // 整机动作里被拒的 profile（如 HFP 缺 MODIFY_PHONE_STATE），成功也要带出去
+    private volatile java.util.List<String> lastWarnings = java.util.Collections.emptyList();
+
     // 自动化执行状态
     private final AtomicBoolean autoAction = new AtomicBoolean(false);
     private final AtomicBoolean autoScan = new AtomicBoolean(false);
@@ -76,6 +83,11 @@ public class BluetoothAutomationManager {
 
     }
     
+    /** 本次动作里被拒的 profile 原因列表（可能为空）。 */
+    public java.util.List<String> getLastWarnings() {
+        return lastWarnings;
+    }
+
     /**
      * 设置状态监听器
      * @param listener 监听器
@@ -90,6 +102,19 @@ public class BluetoothAutomationManager {
      * @param deviceAddress 设备地址
      */
     public void executeAutoAction(String action, String deviceAddress) {
+        executeAutoAction(action, deviceAddress, "all");
+    }
+
+    /**
+     * 执行自动化操作（可限定单个 profile）
+     * @param action 操作类型
+     * @param deviceAddress 设备地址
+     * @param profile a2dp / hfp / leaudio / all
+     */
+    public void executeAutoAction(String action, String deviceAddress, String profile) {
+        requestedProfile = (profile == null || profile.trim().isEmpty())
+                ? "all" : profile.trim().toLowerCase(java.util.Locale.ROOT);
+        lastError = null;
         // 没有蓝牙权限就别装作在跑：既不发动作，也要给调用方一个明确失败（否则要到超时才报错）
         if (!operationUtils.hasBluetoothPermissions()) {
             Log.w(TAG, "executeAutoAction: 缺少蓝牙权限，取消自动化操作");
@@ -124,11 +149,13 @@ public class BluetoothAutomationManager {
                     break;
                 case "连接":
                     success = executeAutoConnect(deviceAddress);
-                    message = success ? "连接成功" : "连接失败或超时";
+                    lastWarnings = operationUtils.takeProfileIssues();
+                    message = success ? "连接成功" : (lastError != null ? lastError : "连接失败或超时");
                     break;
                 case "断链":
                     success = executeAutoDisconnect(deviceAddress);
-                    message = success ? "断链成功" : "断链失败或超时";
+                    lastWarnings = operationUtils.takeProfileIssues();
+                    message = success ? "断链成功" : (lastError != null ? lastError : "断链失败或超时");
                     break;
                 case "取消配对":
                     success = executeAutoUnPair(deviceAddress);
@@ -560,7 +587,7 @@ public class BluetoothAutomationManager {
         CountDownLatch connectLatch = new CountDownLatch(1);
         AtomicBoolean connectSuccess = new AtomicBoolean(false);
         
-        operationUtils.connectToDevice(device, new BluetoothOperationUtils.OperationCallback() {
+        BluetoothOperationUtils.OperationCallback connectCallback = new BluetoothOperationUtils.OperationCallback() {
             @Override
             public void onSuccess() {
                 connectSuccess.set(true);
@@ -570,9 +597,16 @@ public class BluetoothAutomationManager {
             @Override
             public void onError(String error) {
                 Log.e(TAG, "连接失败: " + error);
+                lastError = error;
                 connectLatch.countDown();
             }
-        });
+        };
+        if ("all".equals(requestedProfile)) {
+            operationUtils.connectToDevice(device, connectCallback);
+        } else {
+            Log.d(TAG, "executeAutoConnect: 只连接 profile=" + requestedProfile);
+            operationUtils.connectProfile(device, requestedProfile, connectCallback);
+        }
         
         try {
             // 等待连接完成或超时
@@ -613,7 +647,7 @@ public class BluetoothAutomationManager {
         CountDownLatch disconnectLatch = new CountDownLatch(1);
         AtomicBoolean disconnectSuccess = new AtomicBoolean(false);
         
-        operationUtils.disconnectDevice(device, new BluetoothOperationUtils.OperationCallback() {
+        BluetoothOperationUtils.OperationCallback disconnectCallback = new BluetoothOperationUtils.OperationCallback() {
             @Override
             public void onSuccess() {
                 disconnectSuccess.set(true);
@@ -623,9 +657,16 @@ public class BluetoothAutomationManager {
             @Override
             public void onError(String error) {
                 Log.e(TAG, "断链失败: " + error);
+                lastError = error;
                 disconnectLatch.countDown();
             }
-        });
+        };
+        if ("all".equals(requestedProfile)) {
+            operationUtils.disconnectDevice(device, disconnectCallback);
+        } else {
+            Log.d(TAG, "executeAutoDisconnect: 只断开 profile=" + requestedProfile);
+            operationUtils.disconnectProfile(device, requestedProfile, disconnectCallback);
+        }
         
         try {
             boolean disconnected = disconnectLatch.await(30, TimeUnit.SECONDS);

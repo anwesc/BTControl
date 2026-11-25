@@ -97,17 +97,32 @@ public final class BtctlReporter {
     }
 
     /**
-     * 连接类动作返回的瞬间，profile 状态常常还没刷新（A2DP 的 STATE_CONNECTED 是异步广播），
-     * 立刻采样会拿到 UNKNOWN/DISCONNECTED。调用方据此再等一小会儿重采样。
+     * 目标 profile 是否已经到达期望状态：连接类动作等 CONNECTED，断链类动作等「不再是 CONNECTED」。
      *
-     * @return true 表示 A2DP 与 HFP 都还没看到 CONNECTED
+     * <p>profile 级 connect/disconnect 的 ack 先回来、状态广播后到，直接用动作前的快照会读到旧值
+     * （实测断链 HFP 后结果里仍写 hfp=CONNECTED，而 dumpsys 已经是 Disconnected）。
      */
-    public static boolean profilesPending(Context ctx, String addr) {
+    public static boolean profileSettled(Context ctx, String addr, String profile, boolean expectConnected) {
         if (addr == null || addr.isEmpty()) {
-            return false;
+            return true;
         }
         JSONObject o = snapshot(ctx, "", "", addr, true, "", 0);
-        return !"CONNECTED".equals(o.optString("a2dp")) && !"CONNECTED".equals(o.optString("hfp"));
+        String p = (profile == null || profile.isEmpty()) ? "all" : profile;
+        switch (p) {
+            case "a2dp":
+                return expectConnected ? "CONNECTED".equals(o.optString("a2dp"))
+                        : !"CONNECTED".equals(o.optString("a2dp"));
+            case "hfp":
+                return expectConnected ? "CONNECTED".equals(o.optString("hfp"))
+                        : !"CONNECTED".equals(o.optString("hfp"));
+            case "leaudio":
+                return expectConnected ? "CONNECTED".equals(o.optString("leaudio"))
+                        : !"CONNECTED".equals(o.optString("leaudio"));
+            default:
+                boolean a2dp = "CONNECTED".equals(o.optString("a2dp"));
+                boolean hfp = "CONNECTED".equals(o.optString("hfp"));
+                return expectConnected ? (a2dp || hfp) : (!a2dp && !hfp);
+        }
     }
 
     /** 最近一次结果，供界面状态条显示；跨线程读，简单 volatile 足够。 */

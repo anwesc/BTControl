@@ -12,9 +12,12 @@ import android.bluetooth.BluetoothA2dp;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import androidx.annotation.NonNull;
@@ -37,6 +40,8 @@ public class BluetoothOperationUtils {
     // 操作超时时间
     private static final long DEVICE_OPERATION_TIMEOUT = 30000; // 30秒
     private static final long DISCONNECT_TIMEOUT = 15000; // 15秒
+    // 单 profile 动作的看门狗：超过这个时间还没回调就强制报错，避免 adb 侧永远等不到结果
+    private static final long PROFILE_TIMEOUT = 12000; // 12秒
     
     private final Context context;
     private final BluetoothManager bluetoothManager;
@@ -48,6 +53,11 @@ public class BluetoothOperationUtils {
     // 蓝牙Profile代理对象，用于代理连接和断链方案
     private BluetoothA2dp bluetoothA2dp;
     private BluetoothHeadset bluetoothHeadset;
+
+    // 整机动作里各 profile 的失败原因（如 HFP 被拒），成功后也要能回给调用方
+    private final java.util.List<String> profileIssues =
+            java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
     private BluetoothLeAudio bluetoothLeAudio;
     
     /**
@@ -349,6 +359,7 @@ public class BluetoothOperationUtils {
             return;
         }
         
+        profileIssues.clear();
         executorService.submit(() -> {
             try {
                 if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
@@ -410,6 +421,7 @@ public class BluetoothOperationUtils {
                             @Override
                             public void onError(String error) {
                                 Log.e(TAG, "A2DP 代理连接失败: " + error);
+                                profileIssues.add("A2DP 连接: " + error);
                                 
                                 // 检查是否所有操作都已完成
                                 if (completedOperations.incrementAndGet() == totalOperationsFinalWithLeAudio) {
@@ -434,6 +446,7 @@ public class BluetoothOperationUtils {
                             @Override
                             public void onError(String error) {
                                 Log.e(TAG, "HFP 代理连接失败: " + error);
+                                profileIssues.add("HFP 连接: " + error);
                                 
                                 // 检查是否所有操作都已完成
                                 if (completedOperations.incrementAndGet() == totalOperationsFinalWithLeAudio) {
@@ -459,6 +472,7 @@ public class BluetoothOperationUtils {
                                 @Override
                                 public void onError(String error) {
                                     Log.e(TAG, "LE Audio 代理连接失败: " + error);
+                                    profileIssues.add("LE Audio 连接: " + error);
                                     
                                     // 检查是否所有操作都已完成
                                     if (completedOperations.incrementAndGet() == totalOperationsFinalWithLeAudio) {
@@ -557,6 +571,7 @@ public class BluetoothOperationUtils {
         
         Log.d(TAG, "开始断开设备连接: " + device.getName() + " (" + device.getAddress() + ")");
         
+        profileIssues.clear();
         executorService.submit(() -> {
             try {
                 if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
@@ -601,6 +616,7 @@ public class BluetoothOperationUtils {
                             @Override
                             public void onError(String error) {
                                 Log.e(TAG, "A2DP 代理断开连接失败: " + error);
+                                profileIssues.add("A2DP 断开: " + error);
                                 checkAllOperationsComplete.run();
                             }
                         });
@@ -617,6 +633,7 @@ public class BluetoothOperationUtils {
                             @Override
                             public void onError(String error) {
                                 Log.e(TAG, "HFP 代理断开连接失败: " + error);
+                                profileIssues.add("HFP 断开: " + error);
                                 checkAllOperationsComplete.run();
                             }
                         });
@@ -634,6 +651,7 @@ public class BluetoothOperationUtils {
                                 @Override
                                 public void onError(String error) {
                                     Log.e(TAG, "LE Audio 代理断开连接失败: " + error);
+                                    profileIssues.add("LE Audio 断开: " + error);
                                     checkAllOperationsComplete.run();
                                 }
                             });
@@ -945,8 +963,9 @@ public class BluetoothOperationUtils {
                         callback.onError("A2DP 连接失败");
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "A2DP 连接异常: " + e.getMessage());
-                    callback.onError("A2DP 连接异常: " + e.getMessage());
+                    String reason = describeProfileError("A2DP", "连接", e);
+                    Log.e(TAG, reason);
+                    callback.onError(reason);
                 } finally {
                     // 使用完代理后释放资源
                     closeA2dpProxy();
@@ -974,8 +993,9 @@ public class BluetoothOperationUtils {
                         callback.onError("HFP 连接失败");
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "HFP 连接异常: " + e.getMessage());
-                    callback.onError("HFP 连接异常: " + e.getMessage());
+                    String reason = describeProfileError("HFP", "连接", e);
+                    Log.e(TAG, reason);
+                    callback.onError(reason);
                 } finally {
                     // 使用完代理后释放资源
                     closeHeadsetProxy();
@@ -1004,8 +1024,9 @@ public class BluetoothOperationUtils {
                         callback.onError("LE Audio 连接失败");
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "LE Audio 连接异常: " + e.getMessage());
-                    callback.onError("LE Audio 连接异常: " + e.getMessage());
+                    String reason = describeProfileError("LE Audio", "连接", e);
+                    Log.e(TAG, reason);
+                    callback.onError(reason);
                 } finally {
                     // 使用完代理后释放资源
                     closeLeAudioProxy();
@@ -1033,8 +1054,9 @@ public class BluetoothOperationUtils {
                         callback.onError("A2DP 断开失败");
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "A2DP 断开异常: " + e.getMessage());
-                    callback.onError("A2DP 断开异常: " + e.getMessage());
+                    String reason = describeProfileError("A2DP", "断开", e);
+                    Log.e(TAG, reason);
+                    callback.onError(reason);
                 } finally {
                     // 使用完代理后释放资源
                     closeA2dpProxy();
@@ -1062,8 +1084,9 @@ public class BluetoothOperationUtils {
                         callback.onError("HFP 断开失败");
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "HFP 断开异常: " + e.getMessage());
-                    callback.onError("HFP 断开异常: " + e.getMessage());
+                    String reason = describeProfileError("HFP", "断开", e);
+                    Log.e(TAG, reason);
+                    callback.onError(reason);
                 } finally {
                     // 使用完代理后释放资源
                     closeHeadsetProxy();
@@ -1092,14 +1115,148 @@ public class BluetoothOperationUtils {
                         callback.onError("LE Audio 断开失败");
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "LE Audio 断开异常: " + e.getMessage());
-                    callback.onError("LE Audio 断开异常: " + e.getMessage());
+                    String reason = describeProfileError("LE Audio", "断开", e);
+                    Log.e(TAG, reason);
+                    callback.onError(reason);
                 } finally {
                     // 使用完代理后释放资源
                     closeLeAudioProxy();
                 }
             } else {
                 callback.onError("LE Audio 代理未初始化");
+            }
+        });
+    }
+
+    /**
+     * 把 profile 级 API 的异常翻译成人能看的 reason（供 adb 结果直接读）。
+     * SecurityException 说明这台机器没给 BLUETOOTH_PRIVILEGED，需要系统签名包。
+     */
+    private static String describeProfileError(String profileName, String verb, Exception e) {
+        Throwable cause = e instanceof InvocationTargetException && e.getCause() != null ? e.getCause() : e;
+        if (cause instanceof SecurityException) {
+            // 别猜原因：把系统给的原话带上（可能是 BLUETOOTH_PRIVILEGED，也可能是缺 CDM 关联）
+            return "profile_not_permitted: " + profileName + " " + verb + " 被拒(" + cause.getMessage() + ")";
+        }
+        if (cause instanceof NoSuchMethodException) {
+            // 反射拿不到方法：基本是隐藏 API（@SystemApi）被拦，普通应用这条路走不通
+            return "profile_api_unavailable: " + profileName + " " + verb + " 反射不可用（" + cause.getMessage() + "）";
+        }
+        String msg = cause.getMessage();
+        return profileName + " " + verb + "异常: " + (msg == null ? cause.getClass().getSimpleName() : msg);
+    }
+
+    /** 取走并清空本次整机动作里各 profile 的失败原因；没有失败返回空列表。 */
+    public java.util.List<String> takeProfileIssues() {
+        synchronized (profileIssues) {
+            java.util.List<String> copy = new java.util.ArrayList<>(profileIssues);
+            profileIssues.clear();
+            return copy;
+        }
+    }
+
+    /**
+     * 只对单个 profile 发起连接（system app 才有权限；普通包会得到 profile_not_permitted）。
+     * @param device 目标设备
+     * @param profile a2dp / hfp / leaudio / all
+     * @param onComplete 结果回调
+     */
+    @SuppressLint("MissingPermission")
+    public void connectProfile(BluetoothDevice device, String profile, OperationCallback onComplete) {
+        dispatchProfile(true, device, profile, onComplete);
+    }
+
+    /**
+     * 只对单个 profile 断开连接。
+     * @param device 目标设备
+     * @param profile a2dp / hfp / leaudio / all
+     * @param onComplete 结果回调
+     */
+    @SuppressLint("MissingPermission")
+    public void disconnectProfile(BluetoothDevice device, String profile, OperationCallback onComplete) {
+        dispatchProfile(false, device, profile, onComplete);
+    }
+
+    @SuppressLint("MissingPermission")
+    private void dispatchProfile(boolean connect, BluetoothDevice device, String profile, OperationCallback onComplete) {
+        if (!hasBluetoothPermissions()) {
+            if (onComplete != null) {
+                onComplete.onError("missing bluetooth permission");
+            }
+            return;
+        }
+        if (device == null) {
+            if (onComplete != null) {
+                onComplete.onError("device null");
+            }
+            return;
+        }
+        String target = profile == null ? "all" : profile.trim().toLowerCase(Locale.ROOT);
+        // 兜底：部分机型上 profile 代理或隐藏 API 会永远不回调（实测小米 Android 16 上 LE Audio 就这样），
+        // 会让 adb 侧一直等不到结果。这里加看门狗，超时后强制给一条可诊断的结论。
+        final AtomicBoolean settled = new AtomicBoolean(false);
+        final OperationCallback rawCallback = onComplete;
+        OperationCallback guarded = new OperationCallback() {
+            @Override
+            public void onSuccess() {
+                if (settled.compareAndSet(false, true) && rawCallback != null) {
+                    rawCallback.onSuccess();
+                }
+            }
+
+            @Override
+            public void onError(String error) {
+                if (settled.compareAndSet(false, true) && rawCallback != null) {
+                    rawCallback.onError(error);
+                }
+            }
+        };
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (settled.compareAndSet(false, true)) {
+                String msg = "profile_timeout: " + target + " " + (connect ? "连接" : "断开") + " 内没有结果";
+                Log.e(TAG, msg);
+                if (rawCallback != null) {
+                    rawCallback.onError(msg);
+                }
+            }
+        }, PROFILE_TIMEOUT);
+        executorService.submit(() -> {
+            switch (target) {
+                case "a2dp":
+                    if (connect) {
+                        connectA2dp(device, guarded);
+                    } else {
+                        disconnectA2dp(device, guarded);
+                    }
+                    break;
+                case "hfp":
+                    if (connect) {
+                        connectHfp(device, guarded);
+                    } else {
+                        disconnectHfp(device, guarded);
+                    }
+                    break;
+                case "leaudio":
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                        guarded.onError("leaudio_unsupported: Android 12 以下没有 LE Audio");
+                        break;
+                    }
+                    if (connect) {
+                        connectLeAudio(device, guarded);
+                    } else {
+                        disconnectLeAudio(device, guarded);
+                    }
+                    break;
+                case "all":
+                    if (connect) {
+                        connectToDevice(device, guarded);
+                    } else {
+                        disconnectDevice(device, guarded);
+                    }
+                    break;
+                default:
+                    guarded.onError("unknown_profile: " + profile + "（可用 a2dp/hfp/leaudio/all）");
+                    break;
             }
         });
     }

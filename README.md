@@ -20,10 +20,50 @@ adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
 | `bluetooth_address` | 目标设备地址（也接受 `device_address`）；`state` 与不带地址的 `扫描` 可不传 |
 | `auto_name` | 目标设备名（如 `DM_Speaker`）。没地址时按名字在**已配对**列表里找，先精确匹配再包含匹配；找不到就报 `missing_device_address`，不瞎猜（3.1.0+ 点名了却解析不出来直接失败，不再静默当全局查询） |
 | `scan_sec` | 列表扫描跑几秒（默认 12，最小 3）。只在 `扫描` 不带地址时生效 |
+| `auto_profile` | 只动某一个 profile：`a2dp` / `hfp` / `leaudio` / `all`（默认 `all`）。只对 `连接` / `断链` 有意义，见下面「单 profile 连接/断链」 |
 | `req` | 调用方自带的请求号，原样回显在结果里，用于对齐「哪一次请求」 |
 | `finish` | 结束后自动关界面（`finish_after` 同义） |
 
 `auto_action=state` 是只读查询：不改状态、不等动作，立刻返回当前 bond / profile 状态。
+
+### 单 profile 连接/断链（3.1.0+）
+
+默认动作是「整机」的：`连接` 会调隐藏的 `BluetoothDevice.connect()`，一次把能连的 profile 全连上。
+要只动其中一个，加 `auto_profile`：
+
+```bash
+adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
+  -e auto_action 连接 -e auto_name DM_Speaker -e auto_profile a2dp
+```
+
+结果里的 `profile` 字段回显本次请求，`a2dp`/`hfp`/`leaudio` 三个字段说明实际状态。
+`profile` 级 connect/disconnect 的 ack 比状态广播先到，所以连接类动作最多再采样 6 次（每 500ms）
+把状态等出来，否则会读到动作前的旧值。
+
+权限现实（真机实测，Xiaomi / Android 16 / sdk 37，普通签名包）：
+
+| profile | 连接 | 断开 |
+|---|---|---|
+| `a2dp` | 可用 | 可用 |
+| `hfp` | 被拒：`profile_not_permitted: HFP 连接 被拒(Neither user 10345 nor current process has android.permission.MODIFY_PHONE_STATE.)` | 可用 |
+| `leaudio` | 在这台小米（Android 16 / sdk 37）上**代理永不回调**，动作会一直挂住；Pixel 9 上能返回 `profile_api_unavailable`（见下） | 同左 |
+
+`BluetoothHeadset.connect()` 在这台机器上要 `MODIFY_PHONE_STATE`（signature|privileged），本包不是系统签名
+（`dumpsys package` 的 install permissions 里连 `BLUETOOTH_PRIVILEGED` 都没有），所以 HFP 连接被拒。
+**别指望换 `key/BTControl_sys.jks` 能通用**：平台签名是各品牌自己的私钥，实测这台小米
+`/system/etc/security/otacerts.zip` 里的证书是 `root/tools/sign/miui_keys/releasekey.x509.pem`
+（DER SHA-256 `D4:5F:07:6F:...`），与 `BTControl_sys.jks` 的 `C8:A2:E9:BC:...` 不是同一把；
+而且非 `/system/priv-app` 安装也一样拿不到 privileged 权限。失败时如实回 `profile_not_permitted` 并带上系统原话。
+
+`leaudio` 在 Pixel 9（Android 16 / sdk 36）上直接回
+`profile_api_unavailable: LE Audio 连接 反射不可用（android.bluetooth.BluetoothLeAudio.connect [class android.bluetooth.BluetoothDevice]）`
+—— 隐藏 API 反射被拦，普通应用连/断 LE Audio 没有可用入口。单 profile 动作带 12s 看门狗
+（`profile_timeout`），避免代理不回调时 adb 侧永远等不到结果。
+
+整机动作（`auto_profile=all`）下 `连接/断链` 也会调这三个 profile：被拒的那个不会让整体失败，
+但会出现在结果的 `warnings` 里（例如 `["HFP 连接: profile_not_permitted: ..."]`），别只看 `ok=true` 就以为
+三个 profile 都通了。整机 `连接` 用的是隐藏的 `BluetoothDevice.connect()`，实测被
+`does not have a CDM association with the Bluetooth Device` 拒绝，真正干活的是后面的 profile 兜底。
 
 **不传地址也能查到东西**（别让 adb 任务空跑）：
 
@@ -133,8 +173,10 @@ adb shell settings put secure accessibility_enabled 1
 
 `ok=false` 时 `reason` 取值：`missing_device_address`（没给地址也找不到名字；
 **点名了却解析不出来一定报这个，不会静默退化成全局状态**）、
-`bluetooth_permission_denied`、`bluetooth_disabled`、`no_device_found`、`missing bluetooth permission`，
-以及动作自身的失败原因（如 `连接超时`、`扫描等待超时`）。
+`bluetooth_permission_denied`、`bluetooth_disabled`、`no_device_found`、`missing bluetooth permission`、
+`unknown_profile`（`auto_profile` 写错）、`profile_not_permitted`（单 profile 调用被系统拒绝，
+括号里是系统原话）、`profile_api_unavailable`（隐藏 API 反射不到，如 LE Audio）、
+`profile_timeout`（12s 看门狗：代理没回调），以及动作自身的失败原因（如 `连接超时`、`扫描等待超时`）。
 
 ### 踩过的坑（改这块之前先读）
 
@@ -146,6 +188,10 @@ adb shell settings put secure accessibility_enabled 1
   扫描开始前由 `startDiscovery()` 自己兜底注册，别只依赖 Activity 生命周期。
 - **别在 `onPause` 里停扫描/注销接收器**：adb 触发时界面常被切后台，那样会「扫到一半变聋」。
 - **`stopBluetoothDiscovery()` 会动 UI**，只能在主线程调；工作线程里调会 `CalledFromWrongThreadException`。
+- **profile 级的 connect/disconnect 是「半特权 API」**：`BluetoothA2dp.connect/disconnect` 这台机器放行，
+  `BluetoothHeadset.connect` 直接 `SecurityException`（要 `BLUETOOTH_PRIVILEGED`），别假设三个 profile 一样能用。
+- **动作 ack ≠ 状态到位**：profile 级调用返回后状态广播还在路上，采样要轮询等，且「连上」等 `CONNECTED`、
+  「断开」等「不是 CONNECTED」，方向反了会永远读旧值。
 - **`BluetoothManager.getConnectedDevices(profile)` 在部分机型直接抛**
   `IllegalArgumentException: Profile not supported`（实测小米 Android 16），
   `BtctlReporter` 已退回 `adapter.getProfileConnectionState()`。
