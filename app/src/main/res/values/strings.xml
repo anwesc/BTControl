@@ -22,7 +22,7 @@
     <string name="详情_a2dp">A2DP（媒体）</string>
     <string name="详情_hfp">HFP（通话）</string>
     <string name="详情_leaudio">LE Audio</string>
-    <string name="详情_开关说明">开关只决定该配置能否连接，不会主动连；本页连接是逐个 profile 下发，HFP / LE Audio 需要系统权限，被拒时下方显示原话。CDM 关联只服务列表页的整机 connect 自动化。</string>
+    <string name="详情_开关说明">开关就是连接状态：拨开即连接、拨关即断开；HFP / LE Audio 需要系统权限（Shizuku），被拒会自己拨回去并显示系统原话。CDM 关联只服务列表页的整机 connect 自动化。</string>
     <string name="详情_CDM行">CDM 关联</string>
     <string name="详情_CDM行可选">CDM 关联（可选）</string>
     <string name="详情_整机连接">连接</string>
@@ -40,13 +40,16 @@
     <string name="详情_蓝牙未开启">蓝牙未开启：点这里打开蓝牙后再操作</string>
     <string name="详情_地址无效">设备地址无效，读不到状态</string>
     <string name="详情_整机等待确认">整机指令已受理，等待 profile 状态…</string>
+    <string name="详情_操作进行中">正在处理上一批操作，稍等一下再拨开关</string>
     <string name="详情_无需连接">开启的配置项都已经连上，无需重复连接</string>
     <string name="详情_无需断开">当前没有已连接的配置项，无需断开</string>
     <string name="详情_其余已到位">%1$s已到位</string>
-    <string name="详情_无启用项">没有开启的配置项，先把要连接的开关打开</string>
     <string name="详情_部分失败">部分失败：%1$s</string>
     <string name="详情_连接中列表">正在连接 %1$s …</string>
     <string name="详情_断开中列表">正在断开 %1$s …</string>
+    <string name="详情_单项失败">%1$s：%2$s</string>
+    <string name="详情_单项已连接">%1$s 已连接（状态已确认）</string>
+    <string name="详情_单项已断开">%1$s 已断开（状态已确认）</string>
     <string name="详情_整机已连接">整机已连接（%1$s均已确认）</string>
     <string name="详情_整机已断开">整机已断开（%1$s均已确认）</string>
     <string name="详情_整机超时">整机指令已下发，12s 内没有任何 profile 状态到位</string>

@@ -72,6 +72,21 @@ adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
   `devices` 数组：扫到什么报什么，扫不到就 `ok=false`、`reason=no_device_found`。
   已经配对的设备不会出现在 `devices` 里（UI 列表本来就不显示已配对项），要它们看 `bonded`。
 
+### 开关＝连接状态，也能传参（3.1.0+）
+
+详情页连接配置里那三个开关**就是连接状态**：拨开＝连这个 profile，拨关＝断这个 profile，拨动后在 12 秒内等系统确认，确认不了会自己拨回原位并把系统原话显示在结果行。
+
+```bash
+# 把 A2DP 拨开（等同点 A2DP 那一行）
+adb shell am start -W -n com.autotest.BTControl/.BluetoothControlActivity \
+  -e auto_action 开关 -e bluetooth_address 20:05:11:01:95:10 \
+  -e auto_profile a2dp -e auto_enable 1 -e req sw1 --ez finish true
+
+python mist/scripts/board_verify/phone.py btctl 开关 --name DM_Speaker --profile a2dp --enable 0
+```
+
+实现上 `开关` 在入口翻译成 `连接` / `断链` 再走同一套下发（HFP / LE Audio 有 Shizuku 时走 shell 通道），所以 `action` 上报的是翻译后的动作，`enabled` 只是回显你拨的方向；`auto_enable` 认 `0/1`、`true/false`、`on/off`，`auto_profile` 必须是具体 profile（`all` 会被拒：`switch_requires_profile`）。
+
 ### 结果怎么拿（3.1.0+）
 
 每次动作结束（成功、失败、超时都算）固定输出一条：
@@ -201,19 +216,19 @@ adb shell cmd companiondevice disassociate 0 com.autotest.BTControl 20:05:11:01:
 - 深色模式（`values-night`）单独校色：主色 #0D47A1、强调色 #64B5F6；页面底 `@color/background`（#121212）比卡片底 `surface_night`（#1E1E1E）暗一级，卡片边界能看出来；未连接文字提亮到 #9E9E9E，已连接 #81C784、过渡 #FFB74D；chips 换成深底亮字（#1B5E20/#A5D6A7、#4E2A00/#FFB74D、#303030/#BDBDBD）。`colorPrimaryDark` 原先还留着紫色 #4A148C（夜间状态栏发紫），已改成深蓝。
 - 对话框：`MaterialComponents` 的 AlertDialog 按钮取 `colorPrimary`，夜间 #0D47A1 在深灰底上几乎看不见，所以单独定义了 `ThemeOverlay.BTControl.AlertDialog`（按钮用 `colorSecondary`、标题/正文显式给 `android:textColorPrimary`），并同时挂到 `materialAlertDialogTheme` 与 `alertDialogTheme` 上；红色确认键由 `tintDestructiveButton()` 在 show 之后改色。
 - 头部：设备名、MAC，下面是「连接 / 断开」主按钮与「取消配对」；卡片最底一行「最后刷新 HH:mm:ss」，一眼看出这页是不是实时（配对状态不再单独占 chip，取消配对按钮的可用性就代表配对状态；CDM 状态由「连接配置 · CDM 关联」那行文字按钮的文案体现）。
-- 头部下面第一行是整机按钮：**只有一个按钮**，按当前状态自动显示「连接」或「断开连接」（有任一 profile 通了就算已连接）。点「连接」会按下面三个开关的状态逐个下发（只连开着的），点「断开连接」则对全部 profile 下发断开；动作进行中显示「连接中…/断开中…」并禁用。原来并排的「整机连接 / 整机断开」两个按钮已经删掉。
+- 头部下面是整机按钮：**只有一个按钮**，按当前状态自动显示「连接」或「断开」（有任一 profile 通了就算已连接）。它和三个开关是同一套动作的两层入口：点「连接」= 把还没连上的 profile 全部连上，点「断开」= 断开所有连着的；动作进行中显示「连接中…/断开中…」并禁用。
 - 取消配对在整机操作卡里（红色文字、先弹确认框）；`关联 CDM` / `取消关联` 二选一显示在连接配置卡末尾的「CDM 关联」行：`关联 CDM` 优先走 Shizuku shell 按 MAC 建（`cmd companiondevice associate`，无需人工点选择器），失败或没授权时退回系统 `CompanionDeviceManager` 选择器（需 Android 12+）；`取消关联`、`取消配对` 都先弹确认框；`unpair` 成功后会从保存列表里消失。
 - 「连接配置」三行（A2DP 媒体 / HFP 通话 / LE Audio），每行只有「名字 + 实时状态 + 开关」，行内不再放连接/断开按钮（3.1.0 精简）：状态字号带语义色（绿 `state_connected` / 橙 `state_transition` / 灰 `state_disconnected`），连接动作统一由上面的整机按钮按开关决定。
 - **LE Audio 整行只在两端都支持时出现**：手机侧看 `BluetoothAdapter.isLeAudioSupported()`（Android 13+，返回 `SUCCESS` 才算，系统里 LE Audio 被关掉时这里就是 false）；对端（音响）没有公开 API，只能靠证据——连上过一次（`refresh()` 里写 `le_audio_peer` 偏好），或扫描广播里带 ASCS/BASS/PACS/VCS/MICS/CAS（`0x184E/0x184F/0x1850/0x1844/0x184D/0x1853`）任意一个，`utils/LeAudioSupport.java` 负责登记。两个条件缺一个就整行藏起来，也不用再让整机连接去试一条必然失败的路径。
-- 每行最右的开关语义照系统蓝牙设置页但更保守：开关只表示「允许该 profile 连接」，存在 `detail_profile_switch` 偏好里（按 MAC + profile 存），**不会触发任何连接动作**。整机「连接」只对开着的 profile 下发，一个都没开时直接提示「没有开启的配置项」；「断开连接」始终对全部 profile 生效，免得有连接关不掉。开关在设备可用、正在执行的动作结束时才可点；LE Audio 不支持时不是置灰，而是整行不显示。
+- 每行最右的开关**就是连接状态**（照系统蓝牙设置页）：拨开即连该 profile、拨关即断；拨动后进入 12 秒等待确认（每 300ms 采样），到位显示「✅ X 已连接/已断开（状态已确认）」，超时或权限被拒就自己拨回原位并显示原因。checked 一律由真实连接状态回写（`applyProfileSwitchStates()`），用户拨动期间用 `suppressSwitchCallbacks` 防止回写和手势打架。正在跑的动作未结束时再拨开关会被拒并提示「正在处理上一批操作」。LE Audio 不支持时不是置灰，而是整行不显示。
 - 状态变化由广播驱动（配对 / ACL / A2DP / HFP / LE Audio / 蓝牙开关，250ms 防抖），页面停在前台时断开也能立刻看到，不再只靠 `onResume` 采样。
 - 动作下发后每 300ms 用 `BtctlReporter.profileSettled()` 轮询到终态，最多 12s：整机动作要**每个目标 profile 都到位**才显示「整机已连接/已断开（…均已确认）」，超时显示「12s 内没有任何 profile 状态到位」。只把「还没到位」的 profile 放进目标（已连上的不重复连、本来没连的不重复断），所以重复点不会刷出一堆假失败；部分 profile 下发就报错时显示「部分失败：<谁失败>；<其余>已到位」，把两边都说清，不再 ack 一到就报 ✅。
 - 过渡态看门狗：只要有 profile 停在 CONNECTING/DISCONNECTING（典型是对端自己拉 HFP），每 500ms 再刷一次，最多 12s。广播只在状态切换的那一下响，读到的值有时还差一拍，没有这个看门狗页面会永久挂在「连接中…」。
 - 只开 A2DP 开关去连时，HFP 也可能亮起来——这不是 app 发的指令：日志 `bta_ag_rfc_acp_open` 表明对端以 HF 身份主动开 RFCOMM 建 SLC，app 只调了 `BluetoothA2dp.connect()`。要 A2DP 单连得改 DUT 固件策略，或用系统蓝牙把 HFP 单独断开。
 - 整机动作期间按钮与开关都禁用，防连点并发下发；正在处理的 profile 行内状态位显示「连接中…/断开中…」，等终态回来才按真实状态刷新。
-- 蓝牙关闭时顶部橙色横幅（点一下拉起系统蓝牙开关），地址非法时横幅提示。整机动作已改成逐 profile 下发，不再走 `BluetoothDevice.connect()`，所以不再要求先建 CDM 关联（CDM 仍服务列表页的自动化整机 connect）。
+- 蓝牙关闭时顶部橙色横幅（点一下拉起系统蓝牙开关），地址非法时横幅提示。动作已改成逐 profile 下发，不再走 `BluetoothDevice.connect()`，所以不再要求先建 CDM 关联（CDM 仍服务列表页的自动化整机 connect）。
 - 页面只留一行小字说明（开关语义 + 权限说明合并成一句）；「取消关联 / 取消配对」的后果写在各自确认框里，不再在页面上重复堆三行提示，第一屏就能看完所有控件。
-- 「连接 / 断开连接」＝按开关逐 profile `connectProfile`（HFP / LE Audio 有 Shizuku 时走 shell 通道，否则退回普通 API 并把系统原话显示在结果行）；终态判定是「每个目标 profile 都到位」。
+- 「连接 / 断开」和每行开关是同一套逻辑：逐 profile `connectProfile` / `disconnectProfile`（HFP / LE Audio 有 Shizuku 时走 shell 通道，否则退回普通 API 并把系统原话显示在结果行）；终态判定是「每个目标 profile 都到位」，单个 profile 的成败用「%1$s：%2$s」直接说这一行。
 - 「复制该设备快照 JSON」把 `BtctlReporter.snapshot()` 的结果塞剪贴板，人调试时直接贴给 AI。
 - 失败原因直接显示在页面底部（例如 `profile_not_permitted: HFP 连接 被拒(Neither user ... nor current process has android.permission.MODIFY_PHONE_STATE.)`），不用抓 logcat。
 - 旋转 / 进程重建不再丢操作：busy 行、等终态的方向、底部提示都存进 `onSaveInstanceState`，重建后按原方向继续轮询（重新计 12s），不会出现「按钮已灰、状态永远停在连接中」。
@@ -301,6 +316,7 @@ python mist/scripts/board_verify/phone.py ui --grep "开关|已连接|✅"
 | `断链` | 是 | `a2dp` `hfp` | — |
 | `取消配对` | 是 | `bond` | 取消后再连需重新配对 |
 | `关联` | 是 | `assoc` | 走 CompanionDeviceManager 关联（3.1.0+），系统会弹「寻找设备」选择器，需要目标处于可发现/配对模式；关联成功后 `BluetoothDevice.connect()` 才被放行 |
+| `开关` | 是 | `enabled` `profile` | 等价于把详情页该 profile 的开关拨到 `auto_enable` 的方向：内部翻译成 `连接` / `断链` 后走同一套下发（有 Shizuku 时 HFP / LE Audio 走 shell 通道），`action` 上报翻译后的动作 |
 
 公共字段：`req`、`action`、`addr`、`ok`、`reason`、`elapsed_ms`、`ts`、`a11y`、`adapter`。
 

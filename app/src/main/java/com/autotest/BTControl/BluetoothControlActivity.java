@@ -163,6 +163,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
     /** 本次 adb 请求限定的 profile：all / a2dp / hfp / leaudio */
     private String btctlProfile = "all";
     private String btctlVia = "native";
+    /** 「开关」动作改完后的目标值；null 表示本次动作不是开关。 */
+    private Boolean btctlSwitchEnabled;
     private long btctlStartMs;
 
     // 线程管理
@@ -918,6 +920,17 @@ public class BluetoothControlActivity extends AppCompatActivity {
             return;
         }
 
+        // 「开关」= 直接对这个 profile 连 / 断：auto_enable 1 → 连接，0 → 断开。
+        // 详情页的开关现在就是连接状态本身，所以不再有「只改偏好」的语义。
+        if ("开关".equals(targetAction)) {
+            String translated = translateSwitchAction(intent);
+            if (translated == null) {
+                return; // 参数不合法，错误已经上报
+            }
+            targetAction = translated;
+            btctlAction = targetAction;
+        }
+
         // CDM 关联：BluetoothDevice.connect() 对普通应用要求「已与本设备建立 CompanionDevice 关联」，
         // 否则抛 "does not have a CDM association with the Bluetooth Device"。关联一次之后
         // 整机 connect()/disconnect() 才不会被拦，HFP 也才能由系统侧拉起。
@@ -964,6 +977,31 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
         // 执行自动化操作（auto_profile 非 all 时只动指定的那个 profile）
         automationManager.executeAutoAction(targetAction, targetDeviceAddress, btctlProfile);
+    }
+
+    /**
+     * 把「开关」翻译成对应的连接动作。
+     *
+     * <p>详情页的开关已经等于连接状态，所以 {@code auto_enable 1} 等价于「连接这个 profile」、
+     * {@code 0} 等价于「断链这个 profile」，不用再维护一份独立的偏好。
+     *
+     * @return 翻译后的动作名；参数不合法时返回 null（错误已经上报）
+     */
+    private String translateSwitchAction(Intent intent) {
+        if (!"a2dp".equals(btctlProfile) && !"hfp".equals(btctlProfile) && !"leaudio".equals(btctlProfile)) {
+            emitBtctlResult(false, "switch_requires_profile: auto_profile 需指定 a2dp/hfp/leaudio");
+            return null;
+        }
+        String raw = intent.getStringExtra("auto_enable");
+        if (raw == null || raw.trim().isEmpty()) {
+            emitBtctlResult(false, "missing_auto_enable: auto_enable=0|1");
+            return null;
+        }
+        String v = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        boolean enabled = "1".equals(v) || "true".equals(v) || "on".equals(v);
+        btctlSwitchEnabled = enabled;
+        Log.d(TAG, "自动化: 开关 " + btctlProfile + " = " + enabled);
+        return enabled ? "连接" : "断链";
     }
 
     /**
@@ -1280,6 +1318,9 @@ public class BluetoothControlActivity extends AppCompatActivity {
             snapshot.put("profile", btctlProfile);
             snapshot.put("via", btctlVia);
             snapshot.put("shizuku", ShizukuBridge.status());
+            if (btctlSwitchEnabled != null) {
+                snapshot.put("enabled", btctlSwitchEnabled);
+            }
             // 顺带回一次 CDM 关联状态：没有关联时整机 connect() 必被拒
             snapshot.put("assoc", hasCdmAssociation(btctlAddr));
         } catch (Throwable ignored) {

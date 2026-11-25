@@ -146,7 +146,10 @@ public class DeviceDetailActivity extends AppCompatActivity {
     /** LE Audio 整行容器：手机和对端都支持才显示，否则整行藏起来。 */
     private View leAudioRow;
     /** 开关只是「允许该 profile 参与连接」的本地偏好，不触发任何蓝牙动作。 */
-    private static final String PREFS_PROFILE = "detail_profile_switch";
+    /** 程序回写开关时别再触发用户拨动逻辑。 */
+    private boolean suppressSwitchCallbacks;
+    /** 上次查 Shizuku 状态的时间：状态会随 adb 启动/被杀变，refresh 太勤没必要每次都问。 */
+    private long shizukuStatusCheckedAt;
 
     /** 正在等终态的 profile，键是 a2dp / hfp / leaudio；只在主线程读写。 */
     private final Set<String> busyProfiles = new HashSet<>();
@@ -330,32 +333,81 @@ public class DeviceDetailActivity extends AppCompatActivity {
     }
 
     /**
-     * 开关只记「这个 profile 允许连」的本地偏好，绝不调 connect——
-     * 真正改变连接状态的是「连接 / 断开」两个按钮。
+     * 开关就是连接状态：拨开下发连接、拨关下发断开（跟系统设置页一致）。
+     * 这里只挂监听，checked 由 refresh → applyProfileSwitchStates 统一回写。
      */
     private void bindProfileSwitch(String profile, SwitchMaterial sw) {
         if (sw == null) {
             return;
         }
-        sw.setChecked(isProfileEnabled(profile));
         sw.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            setProfileEnabled(profile, isChecked);
-            updateActionState();
+            if (suppressSwitchCallbacks) {
+                return;
+            }
+            changeProfileBySwitch(profile, isChecked);
         });
     }
 
-    private String profileSwitchKey(String profile) {
-        return (address == null ? "unknown" : address) + ":" + profile;
+    /** 用户拨动单行开关：只对那一行下发，失败或超时就把它拨回真实状态。 */
+    private void changeProfileBySwitch(String profile, boolean connect) {
+        boolean btOn = adapter != null && adapter.isEnabled();
+        if (device == null || !btOn) {
+            applyProfileSwitchStates();
+            return;
+        }
+        if (wholeBusy || !busyProfiles.isEmpty()) {
+            applyProfileSwitchStates();
+            showMessage(false, getString(R.string.详情_操作进行中));
+            return;
+        }
+        if (isProfileConnected(profileIdOf(profile)) == connect) {
+            // 状态已经对了（对端自己连上 / 自己断了），只回写视觉，不下发
+            applyProfileSwitchStates();
+            return;
+        }
+        startProfilesChange(connect, Collections.singletonList(profile), false);
     }
 
-    private boolean isProfileEnabled(String profile) {
-        return getSharedPreferences(PREFS_PROFILE, MODE_PRIVATE)
-                .getBoolean(profileSwitchKey(profile), true);
+    /** 把开关拨到真实状态；正在等终态的行按用户意图保持，别被旧状态弹回去。 */
+    private void applyProfileSwitchStates() {
+        suppressSwitchCallbacks = true;
+        try {
+            applyProfileSwitchState(PROFILE_A2DP, a2dpEnabledSwitch);
+            applyProfileSwitchState(PROFILE_HFP, hfpEnabledSwitch);
+            applyProfileSwitchState(PROFILE_LEAUDIO, leAudioEnabledSwitch);
+        } finally {
+            suppressSwitchCallbacks = false;
+        }
     }
 
-    private void setProfileEnabled(String profile, boolean enabled) {
-        getSharedPreferences(PREFS_PROFILE, MODE_PRIVATE)
-                .edit().putBoolean(profileSwitchKey(profile), enabled).apply();
+    /** 状态行别一直用进页面那一刻的快照：服务被杀或刚拉起时，最多 2 秒内跟上。 */
+    private void refreshShizukuStatusIfStale() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - shizukuStatusCheckedAt < 2000) {
+            return;
+        }
+        shizukuStatusCheckedAt = now;
+        shizukuStatus = ShizukuBridge.status();
+        shizukuOk = "ok".equals(shizukuStatus);
+        updateShizukuRow();
+        if (cdmRowLabel != null) {
+            cdmRowLabel.setText(shizukuOk ? R.string.详情_CDM行 : R.string.详情_CDM行可选);
+        }
+    }
+
+    private void applyProfileSwitchState(String profile, SwitchMaterial sw) {
+        if (sw == null) {
+            return;
+        }
+        boolean checked;
+        if (busyProfiles.contains(profile)) {
+            checked = Boolean.TRUE.equals(busyExpectConnected.get(profile));
+        } else {
+            checked = isProfileConnected(profileIdOf(profile));
+        }
+        if (sw.isChecked() != checked) {
+            sw.setChecked(checked);
+        }
     }
 
     private void bindActions() {
@@ -501,6 +553,7 @@ public class DeviceDetailActivity extends AppCompatActivity {
             LeAudioSupport.markPeer(this, address);
         }
         updateLeAudioRow();
+        refreshShizukuStatusIfStale();
 
         updateActionState();
         scheduleTransitionWatchdog();
@@ -562,15 +615,17 @@ public class DeviceDetailActivity extends AppCompatActivity {
     private void updateActionState() {
         boolean btOn = adapter != null && adapter.isEnabled();
         boolean deviceReady = device != null && btOn;
-        boolean idle = deviceReady && !wholeBusy;
+        boolean busyNow = wholeBusy || !busyProfiles.isEmpty();
+        boolean idle = deviceReady && !busyNow;
         // 开关能不能点看「这一行是否真的存在」，CDM 能不能点只看系统版本，两者别混
         boolean leAudioSupported = leAudioAvailable();
         boolean cdmSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S;
 
-        // 开关本身：设备可用且这行没在等终态时才可点；LE Audio 不支持时不给点
+        // 开关本身就是连接动作：一批动作没下来之前一律锁住，避免并发下发互相打架
         setSwitchEnabled(a2dpEnabledSwitch, idle);
         setSwitchEnabled(hfpEnabledSwitch, idle);
         setSwitchEnabled(leAudioEnabledSwitch, idle && leAudioSupported);
+        applyProfileSwitchStates();
         setButtonsEnabled(idle, R.id.wholeActionButton);
         updateWholeActionButton();
 
@@ -738,20 +793,9 @@ public class DeviceDetailActivity extends AppCompatActivity {
         return list;
     }
 
-    /** 连接只动开关开着的；断开永远对全体生效，免得留下关不掉的连接。 */
-    private List<String> enabledProfiles() {
-        List<String> list = new ArrayList<>();
-        for (String profile : supportedProfiles()) {
-            if (isProfileEnabled(profile)) {
-                list.add(profile);
-            }
-        }
-        return list;
-    }
-
     /** 只把「还没到位」的 profile 放进目标：已经连上的不必再连，本来就没连的不必再断。 */
     private List<String> pendingProfiles(boolean connect) {
-        List<String> candidates = connect ? enabledProfiles() : supportedProfiles();
+        List<String> candidates = supportedProfiles();
         List<String> targets = new ArrayList<>();
         for (String profile : candidates) {
             boolean connected = isProfileConnected(profileIdOf(profile));
@@ -834,29 +878,28 @@ public class DeviceDetailActivity extends AppCompatActivity {
     // ---------------------------------------------------------------- 整机
 
     private void changeAll(final boolean connect) {
-        if (device == null || wholeBusy) {
+        if (device == null || wholeBusy || !busyProfiles.isEmpty()) {
             return;
         }
-        startWholeChange(connect);
+        startProfilesChange(connect, pendingProfiles(connect), true);
     }
 
     /**
-     * 整机动作＝按开关把多个 profile 一起下发，而不是调 device.connect()：
-     * 「连哪些」由开关决定，HFP / LE Audio 还能走 Shizuku 通道。
+     * 一批 profile 一起下发（整机按钮是多行、开关是单行），而不是调 device.connect()：
+     * HFP / LE Audio 还能走 Shizuku 通道，失败原因带系统原话。
      */
-    private void startWholeChange(final boolean connect) {
-        final List<String> targets = pendingProfiles(connect);
+    private void startProfilesChange(final boolean connect, final List<String> targets,
+                                     final boolean fromWholeButton) {
         if (targets.isEmpty()) {
             if (!connect) {
                 showMessage(true, getString(R.string.详情_无需断开));
-            } else if (enabledProfiles().isEmpty()) {
-                showMessage(false, getString(R.string.详情_无启用项));
             } else {
                 showMessage(true, getString(R.string.详情_无需连接));
             }
+            applyProfileSwitchStates();
             return;
         }
-        wholeBusy = true;
+        wholeBusy = fromWholeButton;
         wholeExpectConnected = connect;
         busyProfiles.clear();
         busyExpectConnected.clear();
@@ -906,7 +949,15 @@ public class DeviceDetailActivity extends AppCompatActivity {
         }
         runOnUiThread(() -> {
             if (ok.isEmpty()) {
-                finishWholeOperation(false, getString(R.string.详情_部分失败, describeErrors(errors)));
+                if (targets.size() == 1) {
+                    // 单行开关拨动失败：直接说这一行，别用「部分失败」
+                    final String only = targets.get(0);
+                    finishWholeOperation(false, getString(R.string.详情_单项失败,
+                            profileLabel(only), errors.get(only)));
+                } else {
+                    finishWholeOperation(false, getString(R.string.详情_部分失败,
+                            describeErrors(errors)));
+                }
                 return;
             }
             messageTextView.setText(R.string.详情_整机等待确认);
@@ -947,7 +998,11 @@ public class DeviceDetailActivity extends AppCompatActivity {
                 }
                 String detail = describeTargets(targets);
                 if (allSettled) {
-                    if (errors.isEmpty()) {
+                    if (errors.isEmpty() && targets.size() == 1) {
+                        // 单行开关拨动：说「a2dp 已连接」，别用整机的说法
+                        finishWholeOperation(true, getString(expectConnected
+                                ? R.string.详情_单项已连接 : R.string.详情_单项已断开, detail));
+                    } else if (errors.isEmpty()) {
                         finishWholeOperation(true, expectConnected
                                 ? getString(R.string.详情_整机已连接, detail)
                                 : getString(R.string.详情_整机已断开, detail));
