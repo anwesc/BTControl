@@ -54,6 +54,7 @@ import com.autotest.BTControl.adapters.SectionHeaderAdapter;
 import com.autotest.BTControl.utils.BluetoothOperationUtils;
 import com.autotest.BTControl.utils.BluetoothDiscoveryUtils;
 import com.autotest.BTControl.utils.BtctlReporter;
+import com.autotest.BTControl.utils.ScanAdvertCache;
 import com.autotest.BTControl.utils.ShizukuBridge;
 import com.autotest.BTControl.utils.ToastUtils;
 import com.autotest.BTControl.automation.BluetoothAutomationManager;
@@ -1651,6 +1652,38 @@ public class BluetoothControlActivity extends AppCompatActivity {
     // ==================== 设备扫描相关方法 ====================
 
     /**
+     * 连续扫描时同一台设备会反复被回调：只把最新 RSSI 写回已有的列表项。
+     *
+     * <p>不重建 item、不重排列表，避免扫描中列表跳动。
+     */
+    private void refreshDeviceRssi(String address) {
+        int rssi = ScanAdvertCache.rssiOf(address);
+        if (rssi == ScanAdvertCache.RSSI_UNKNOWN) {
+            return;
+        }
+        boolean changed = false;
+        for (BluetoothDeviceAdapter.BluetoothDeviceItem item : NRDeviceList) {
+            if (address.equalsIgnoreCase(item.getDeviceAddress())) {
+                item.setRssi(rssi);
+                changed = true;
+                break;
+            }
+        }
+        if (!changed) {
+            for (BluetoothDeviceAdapter.BluetoothDeviceItem item : NFDeviceList) {
+                if (address.equalsIgnoreCase(item.getDeviceAddress())) {
+                    item.setRssi(rssi);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if (changed) {
+            runOnUiThread(this::renderDeviceLists);
+        }
+    }
+
+    /**
      * 开始扫描蓝牙设备（连续扫描模式）
      */
     @SuppressLint({"NotifyDataSetChanged", "MissingPermission"})
@@ -1688,6 +1721,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
         updateStatus("开始扫描蓝牙设备...");
         
         // 清空周围设备和非常用设备列表
+        ScanAdvertCache.clear(); // 信号强度/UUID 是上一轮的事，别残留
         NRDevicesMap.clear();
         NRDeviceList.clear();
         NFDevicesMap.clear();
@@ -1733,7 +1767,9 @@ public class BluetoothControlActivity extends AppCompatActivity {
                     }
 
                     if (NRDevicesMap.containsKey(deviceAddress) || NFDevicesMap.containsKey(deviceAddress)){
-                        Log.d(TAG, "onDeviceFound: 设备已在发现列表中，跳过 - " + deviceName);
+                        // 设备已经有了，但连续扫描时 RSSI 会变：只刷新信号强度，不重排队
+                        Log.d(TAG, "onDeviceFound: 设备已在发现列表中，只刷新 RSSI - " + deviceName);
+                        refreshDeviceRssi(deviceAddress);
                         return;
                     }
                     Log.d(TAG, "onDeviceFound: 发现设备 - " + deviceName + ", 地址: " + deviceAddress + ", RSSI: " + rssi);
@@ -1750,6 +1786,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
                                             false, // 新发现的设备未配对
                                             false // 扫描到的设备默认为未连接
                                     );
+                            deviceItem.setRssi(ScanAdvertCache.rssiOf(deviceAddress));
                             NRDeviceList.add(deviceItem);
                         }
                     } else {
@@ -1763,6 +1800,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
                                             false, // 新发现的设备未配对
                                             false // 扫描到的设备默认为未连接
                                     );
+                            deviceItem.setRssi(ScanAdvertCache.rssiOf(deviceAddress));
                             NFDeviceList.add(deviceItem);
                         }
                     }

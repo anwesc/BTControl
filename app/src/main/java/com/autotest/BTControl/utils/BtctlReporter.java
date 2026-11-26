@@ -318,6 +318,10 @@ public final class BtctlReporter {
                 item.put("name", d.getName() == null ? "" : d.getName());
                 item.put("addr", d.getAddress());
                 item.put("bond", bondName(d.getBondState()));
+                // rssi / uuids 只有「扫描」这一刻知道，取不到就给 null / 空数组，别编数字
+                int rssi = ScanAdvertCache.rssiOf(d.getAddress());
+                item.put("rssi", rssi == ScanAdvertCache.RSSI_UNKNOWN ? JSONObject.NULL : rssi);
+                item.put("uuids", new JSONArray(ScanAdvertCache.uuidsOf(d.getAddress())));
                 arr.put(item);
             } catch (Throwable ignored) {
                 // 忽略单台设备

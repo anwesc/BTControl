@@ -332,6 +332,13 @@ python mist/scripts/board_verify/phone.py ui --grep "开关|已连接|✅"
 
 > 上表里「会弹」的动作，app 在动作开始前先做一次预检：`配对`/`重新配对` 检查无障碍（没开直接回 `needs_a11y`）、`关联` 检查 Shizuku（不是 `ok` 直接回 `needs_shizuku`）。这样脚本拿到的是「缺什么」，而不是 25 秒后一条 `timeout`。
 
+### 扫描结果里的信号强度与服务 UUID（3.1.0+）
+
+- 界面：「周围设备」每行右侧显示最近一次 `RSSI`（如 `-54 dBm`）；「已保存设备」行不显示（那几台是配对记录，没有实况信号）。
+- `btctl 扫描` 的 `devices[]` 每项现在带 `rssi`（整数 dBm，没扫到为 `null`）与 `uuids`（16-bit 短 UUID 数组，如 `["184E","1850"]`）。
+- 数据只活在一轮扫描里：开始扫描时清空，连续扫描时同一台设备只更新 RSSI、不重排列表。
+- **`uuids` 现在实测基本是空数组**，原因两条：①`BluetoothDiscoveryUtils.startSingleScan()` 里的 BLE 扫描整段是注释掉的，只有经典发现；②经典发现的 `ACTION_FOUND` 在多数机型上不带 `EXTRA_UUID`。要拿到真实 UUID 必须打开 BLE 扫描（见 README 里 LE Audio 那条）。
+
 ### 各动作会不会弹系统框（3.1.0+，写自动化脚本前先看这张表）
 
 | 动作 | 系统 UI | 说明 |

@@ -313,6 +313,7 @@ public class BluetoothDiscoveryUtils {
         String deviceName = device.getName();
         
         Log.d(TAG, "处理发现的设备 - 名称: " + deviceName + ", 地址: " + deviceAddress + ", RSSI: " + rssi);
+        ScanAdvertCache.putRssi(device, rssi);
         
         // 通过回调通知Activity发现的设备
         if (callback != null) {
@@ -378,10 +379,13 @@ public class BluetoothDiscoveryUtils {
             if (BluetoothDevice.ACTION_FOUND.equals(action)) {
                 BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                 short rssi = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, (short) 0);
+                // 经典发现偶尔会带一个 UUID（BLE 设备被经典扫描到时），能拿就拿
+                android.os.ParcelUuid foundUuid = intent.getParcelableExtra(BluetoothDevice.EXTRA_UUID);
 
                 if (device != null) {
                         Log.d(TAG, "发现蓝牙设备: " + device.getName() + " (" + device.getAddress() + "), RSSI: " + rssi);
 
+                        ScanAdvertCache.putUuid(device, foundUuid);
                         // 使用统一的设备处理方法
                         handleDiscoveredDevice(device, rssi);
                     } else {
@@ -450,6 +454,8 @@ public class BluetoothDiscoveryUtils {
                 int rssi = result.getRssi();
                 // 广播里带了 LE Audio 服务就记一笔，详情页据此决定是否露出这一行
                 LeAudioSupport.observeScanResult(context, result);
+                // 信号强度与服务 UUID 只在这一刻拿得到，先落缓存给列表和 btctl 结果用
+                ScanAdvertCache.putScanResult(result);
                 // 使用统一的设备处理方法
                 handleDiscoveredDevice(device, rssi);
             }
@@ -463,6 +469,7 @@ public class BluetoothDiscoveryUtils {
                 if (device != null) {
                     int rssi = result.getRssi();
                     LeAudioSupport.observeScanResult(context, result);
+                    ScanAdvertCache.putScanResult(result);
                     // 使用统一的设备处理方法
                     handleDiscoveredDevice(device, rssi);
                 }

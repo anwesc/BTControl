@@ -13,9 +13,11 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.autotest.BTControl.R;
+import com.autotest.BTControl.utils.ScanAdvertCache;
 import com.autotest.BTControl.utils.VibrationUtils;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 蓝牙设备列表适配器
@@ -82,6 +84,15 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
                 holder.deviceStatusTextView.setVisibility(View.GONE);
             }
             holder.deviceProfilesTextView.setVisibility(View.GONE);
+
+            // 信号强度：扫描到的周围设备才有值，已保存设备一直是 RSSI_UNKNOWN
+            if (deviceItem.getRssi() != ScanAdvertCache.RSSI_UNKNOWN) {
+                holder.deviceRssiTextView.setVisibility(View.VISIBLE);
+                holder.deviceRssiTextView.setText(
+                        String.format(Locale.ROOT, "%d dBm", deviceItem.getRssi()));
+            } else {
+                holder.deviceRssiTextView.setVisibility(View.GONE);
+            }
 
             // 右侧箭头：只有已保存设备才有，且只有它能把用户带进详情页
             ImageView detailImageView = holder.deviceDetailImageView;
@@ -151,6 +162,7 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
         TextView deviceAddressTextView;
         TextView deviceStatusTextView;
         TextView deviceProfilesTextView;
+        TextView deviceRssiTextView;
         ImageView deviceDetailImageView;
         
         public DeviceViewHolder(@NonNull View itemView) {
@@ -159,6 +171,7 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
             deviceAddressTextView = itemView.findViewById(R.id.deviceAddressTextView);
             deviceStatusTextView = itemView.findViewById(R.id.deviceStatusTextView);
             deviceProfilesTextView = itemView.findViewById(R.id.deviceProfilesTextView);
+            deviceRssiTextView = itemView.findViewById(R.id.deviceRssiTextView);
             deviceDetailImageView = itemView.findViewById(R.id.deviceDetailImageView);
         }
     }
@@ -190,6 +203,8 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
         private BluetoothDevice bluetoothDevice;
         private boolean updateStatus; // 是否更新状态
         private boolean showUnpairedStatus; // 是否显示"未配对"状态
+        /** 最近一次扫描到的信号强度；没扫到过就是 {@link ScanAdvertCache#RSSI_UNKNOWN}。 */
+        private int rssi = ScanAdvertCache.RSSI_UNKNOWN;
 
         public BluetoothDeviceItem(BluetoothDevice device, boolean isPaired, boolean isConnected) {
             this.bluetoothDevice = device;
@@ -273,6 +288,14 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
         
         public boolean isConnected() {
             return isConnected;
+        }
+
+        public int getRssi() {
+            return rssi;
+        }
+
+        public void setRssi(int rssi) {
+            this.rssi = rssi;
         }
         
         public boolean shouldUpdateStatus() {
