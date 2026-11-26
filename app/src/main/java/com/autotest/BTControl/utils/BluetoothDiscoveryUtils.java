@@ -7,7 +7,9 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -19,6 +21,7 @@ import android.util.Log;
 
 import androidx.core.app.ActivityCompat;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -257,6 +260,40 @@ public class BluetoothDiscoveryUtils {
         }
     }
     
+    /** LE Audio 广播里会出现这两个服务：ASCS（音频流控制）/ PACS（发布音频能力）。 */
+    private static final String[][] LE_AUDIO_SERVICES = {
+            {"0000184E-0000-1000-8000-00805F9B34FB", "ASCS"},
+            {"00001850-0000-1000-8000-00805F9B34FB", "PACS"},
+    };
+
+    /** BLE 扫描是否已启动，避免连续扫描时重复 startScan。 */
+    private final AtomicBoolean leScanning = new AtomicBoolean(false);
+
+    /** 起一轮带 LE Audio 过滤器的 BLE 扫描（失败只记日志，不影响经典发现）。 */
+    @SuppressLint("MissingPermission")
+    private void startLeAudioScan() {
+        BluetoothLeScanner bleScanner = bluetoothAdapter == null ? null : bluetoothAdapter.getBluetoothLeScanner();
+        if (bleScanner == null || !leScanning.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            List<ScanFilter> filters = new ArrayList<>();
+            for (String[] service : LE_AUDIO_SERVICES) {
+                filters.add(new ScanFilter.Builder()
+                        .setServiceUuid(android.os.ParcelUuid.fromString(service[0]))
+                        .build());
+            }
+            ScanSettings settings = new ScanSettings.Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .build();
+            bleScanner.startScan(filters, settings, leScanCallback);
+            Log.d(TAG, "BLE 扫描已启动（只过滤 LE Audio 服务）");
+        } catch (Exception e) {
+            leScanning.set(false);
+            Log.w(TAG, "BLE 扫描启动失败: " + e.getMessage());
+        }
+    }
+
     /**
      * 执行单次扫描
      */
@@ -282,19 +319,9 @@ public class BluetoothDiscoveryUtils {
         }
         Log.d(TAG, "经典蓝牙设备发现启动成功");
 
-        /*
-        // 开始BLE设备扫描
-        if (bleScanner != null) {
-            ScanSettings settings = new ScanSettings.Builder()
-                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                    .build();
-
-            List<ScanFilter> filters = new ArrayList<>();
-            // 可以添加扫描过滤器
-
-            bleScanner.startScan(filters, settings, leScanCallback);
-        }
-        */
+        // BLE 扫描只留着看 LE Audio：广播里的服务 UUID（ASCS/PACS）和 RSSI 只有这里拿得到，
+        // 经典发现给不了。带上过滤器，避免把周围一堆随机地址刷进列表。
+        startLeAudioScan();
     }
     
     /**
@@ -352,7 +379,8 @@ public class BluetoothDiscoveryUtils {
 
         /*
         // 暂时关闭BLE设备扫描，只使用经典蓝牙扫描
-        if (bleScanner != null) {
+        BluetoothLeScanner bleScanner = bluetoothAdapter == null ? null : bluetoothAdapter.getBluetoothLeScanner();
+        if (bleScanner != null && leScanning.compareAndSet(true, false)) {
             bleScanner.stopScan(leScanCallback);
         }
         */

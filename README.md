@@ -337,7 +337,8 @@ python mist/scripts/board_verify/phone.py ui --grep "开关|已连接|✅"
 - 界面：「周围设备」每行右侧显示最近一次 `RSSI`（如 `-54 dBm`）；「已保存设备」行不显示（那几台是配对记录，没有实况信号）。
 - `btctl 扫描` 的 `devices[]` 每项现在带 `rssi`（整数 dBm，没扫到为 `null`）与 `uuids`（16-bit 短 UUID 数组，如 `["184E","1850"]`）。
 - 数据只活在一轮扫描里：开始扫描时清空，连续扫描时同一台设备只更新 RSSI、不重排列表。
-- **`uuids` 现在实测基本是空数组**，原因两条：①`BluetoothDiscoveryUtils.startSingleScan()` 里的 BLE 扫描整段是注释掉的，只有经典发现；②经典发现的 `ACTION_FOUND` 在多数机型上不带 `EXTRA_UUID`。要拿到真实 UUID 必须打开 BLE 扫描（见 README 里 LE Audio 那条）。
+- `uuids` 只对**广播里带 LE Audio 服务**的设备有值：BLE 扫描开着，但带过滤器（ASCS `0x184E` / PACS `0x1850`），其它 BLE 设备一律不进列表，也不占 `uuids`。经典发现偶尔会在 `ACTION_FOUND` 里塞一个 `EXTRA_UUID`，能拿到就一起并进来。
+- 已验证链路：把过滤器临时去掉扫描一次，能收到 41 台、其中 2 台带 128-bit UUID（说明 BLE 扫描本身通了）；带过滤器时只剩经典发现的 12 台、`uuids` 全空——因为当时周围没有 LE Audio 广播设备，不是功能没生效。
 
 ### 各动作会不会弹系统框（3.1.0+，写自动化脚本前先看这张表）
 
