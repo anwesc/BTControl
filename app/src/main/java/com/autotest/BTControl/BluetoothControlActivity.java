@@ -189,6 +189,9 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
     /** 主线程 Handler，用于「已保存设备」刷新防抖。 */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    /** 正在连接中的已保存设备地址；列表行据此显示转圈，连上/失败/超时都会清掉。 */
+    private String connectingDeviceAddress;
+    private final Runnable connectingTimeout = () -> clearConnectingDevice();
     /** 音频路由回调：放歌/暂停/通话切换会走这里，用来把「使用中」刷新出来。 */
     private AudioDeviceCallback audioRouteCallback;
 
@@ -274,6 +277,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
         super.onPause();
         resumed = false;
         unregisterAudioRouteCallback();
+        clearConnectingDevice();
 
         // 这里刻意不停扫描、也不注销接收器：AI 用 adb 触发扫描时界面经常被切到后台，
         // 在 onPause 收摊就等于「扫到一半变聋」。收摊统一放到 onDestroy 的 cleanup()。
@@ -1861,7 +1865,26 @@ public class BluetoothControlActivity extends AppCompatActivity {
         if (deviceItem.isConnected()) {
             confirmDisconnectDevice(device);
         } else {
+            markConnectingDevice(device.getAddress());
             connectToDevice(device);
+        }
+    }
+
+    /** 点下「连接」就先在那一行转圈，别让用户盯着没反应的列表；结果回来或超时就收掉。 */
+    private void markConnectingDevice(String address) {
+        connectingDeviceAddress = address;
+        if (SavedDeviceListAdapter != null) {
+            SavedDeviceListAdapter.setConnectingAddress(address);
+        }
+        mainHandler.removeCallbacks(connectingTimeout);
+        mainHandler.postDelayed(connectingTimeout, 20000);
+    }
+
+    private void clearConnectingDevice() {
+        mainHandler.removeCallbacks(connectingTimeout);
+        connectingDeviceAddress = null;
+        if (SavedDeviceListAdapter != null) {
+            SavedDeviceListAdapter.setConnectingAddress(null);
         }
     }
 
@@ -2141,6 +2164,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
     private void connectToDevice(BluetoothDevice device) {
         if (device == null) {
             Log.e(TAG, "connectToDevice: 设备为空，无法连接");
+            clearConnectingDevice();
             showErrorMessage("设备为空，无法连接");
             return;
         }
@@ -2151,6 +2175,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
         
         if (!hasPermissions) {
             Log.e(TAG, "connectToDevice: 没有蓝牙权限，无法连接设备");
+            clearConnectingDevice();
             showErrorMessage("没有蓝牙权限，无法连接设备");
             return;
         }
@@ -2165,6 +2190,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
             public void onSuccess() {
                 runOnUiThread(() -> {
                     String successMsg = "设备连接成功: " + deviceName;
+                    clearConnectingDevice();
                     showSuccessMessage(successMsg);
                 });
             }
@@ -2173,6 +2199,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
             public void onError(String error) {
                 runOnUiThread(() -> {
                     String errorMsg = "设备连接失败: " + deviceName + " - " + error;
+                    clearConnectingDevice();
                     showErrorMessage(errorMsg);
                 });
             }

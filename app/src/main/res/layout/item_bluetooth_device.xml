@@ -1,59 +1,92 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  设备行三行：名字 / 地址 / 状态。
-  状态单独一行且默认 GONE，出现或消失只让卡片变高变矮，名字和地址的位置永远不动。
+  设备行两行：名字 / 地址，状态贴右侧箭头左边（默认 GONE）。
   整行点击 = 连接（未连接时）或断开（已连接时，先弹确认框）；右侧带底托的箭头进设备详情。
+  外层 FrameLayout 不设 padding，连接中的流光才能贴着卡片白底边框跑；
+  内容缩进靠里层 ConstraintLayout 的 padding。
 -->
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_margin="4dp"
-    android:background="@drawable/device_item_complete_selector"
-    android:paddingStart="12dp"
-    android:paddingTop="10dp"
-    android:paddingEnd="8dp"
-    android:paddingBottom="10dp">
+    android:background="@drawable/device_item_complete_selector">
 
-    <TextView
-        android:id="@+id/deviceNameTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:textColor="?android:attr/textColorPrimary"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        app:layout_constrainedWidth="true"
-        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
-        app:layout_constraintHorizontal_bias="0"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+    <!-- 连接中：一圈流光绕着整张卡片转（画在内容下面，不挡文字） -->
+    <com.autotest.BTControl.utils.ConnectingRingView
+        android:id="@+id/deviceConnectingRing"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
 
-    <LinearLayout
-        android:id="@+id/deviceAddressRow"
-        android:layout_width="0dp"
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/deviceNameTextView">
+        android:paddingStart="12dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="10dp">
 
         <TextView
-            android:id="@+id/deviceAddressTextView"
-            android:layout_width="0dp"
+            android:id="@+id/deviceNameTextView"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="13sp"
-            tools:text="20:05:11:01:95:10" />
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            app:layout_constrainedWidth="true"
+            app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
+            app:layout_constraintHorizontal_bias="0"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
 
-        <!-- 信号强度：只有扫描到的周围设备有值 -->
+        <LinearLayout
+            android:id="@+id/deviceAddressRow"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            app:layout_constraintEnd_toStartOf="@id/deviceStatusTextView"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/deviceNameTextView">
+
+            <TextView
+                android:id="@+id/deviceAddressTextView"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="13sp"
+                tools:text="20:05:11:01:95:10" />
+
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/deviceStatusTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="6dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/state_connected"
+            android:textSize="12sp"
+            android:visibility="gone"
+            app:layout_constrainedWidth="true"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
+            app:layout_constraintStart_toEndOf="@id/deviceAddressRow"
+            app:layout_constraintTop_toTopOf="parent"
+            tools:text="● 已连接 | 使用中"
+            tools:visibility="visible" />
+
+        <!-- 信号强度：扫描到的周围设备行才有，位置在整行右侧垂直居中（和改版前一致） -->
         <TextView
             android:id="@+id/deviceRssiTextView"
             android:layout_width="wrap_content"
@@ -63,38 +96,26 @@
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="11sp"
             android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
             tools:text="-57 dBm" />
-    </LinearLayout>
 
-    <TextView
-        android:id="@+id/deviceStatusTextView"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:textColor="@color/state_connected"
-        android:textSize="12sp"
-        android:visibility="gone"
-        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/deviceAddressRow"
-        tools:text="使用中"
-        tools:visibility="visible" />
+        <!-- 右侧箭头：带一颗圆角底托，明确「这块是单独按钮（进详情）」，和整行的连接/断开区分开 -->
+        <ImageView
+            android:id="@+id/deviceDetailImageView"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/chevron_tray"
+            android:contentDescription="@string/设备_进入详情"
+            android:foreground="?android:attr/selectableItemBackgroundBorderless"
+            android:padding="8dp"
+            android:src="@drawable/ic_chevron_right"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- 右侧箭头：带一颗圆角底托，明确「这块是单独按钮（进详情）」，和整行的连接/断开区分开 -->
-    <ImageView
-        android:id="@+id/deviceDetailImageView"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:background="@drawable/chevron_tray"
-        android:contentDescription="@string/设备_进入详情"
-        android:foreground="?android:attr/selectableItemBackgroundBorderless"
-        android:padding="8dp"
-        android:src="@drawable/ic_chevron_right"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+</FrameLayout>

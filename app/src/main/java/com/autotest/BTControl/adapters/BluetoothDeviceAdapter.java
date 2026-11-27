@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.autotest.BTControl.R;
+import com.autotest.BTControl.utils.ConnectingRingView;
 import com.autotest.BTControl.utils.ScanAdvertCache;
 import com.autotest.BTControl.utils.VibrationUtils;
 
@@ -30,6 +31,8 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
     private final DeviceLongClickListener longClickListener;
     /** 右侧箭头的监听器：为 null 时不显示箭头（周围设备 / 非常用设备不需要进详情页）。 */
     private DeviceClickListener detailClickListener;
+    /** 正在连接中的设备地址：只有这一行会显示转圈 + 「正在连接」，连上或失败后由 Activity 清空。 */
+    private String connectingAddress;
     
     /**
      * 构造函数
@@ -44,6 +47,13 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
         this.longClickListener = longClickListener;
     }
     
+    /** 标记哪一行正在连接（传 null 表示没有连接中的行）。 */
+    @SuppressLint("NotifyDataSetChanged")
+    public void setConnectingAddress(String address) {
+        this.connectingAddress = address;
+        notifyDataSetChanged();
+    }
+
     /** 给「已保存设备」装上右侧箭头：箭头和整行都进详情页，长按仍是操作面板。 */
     public void setOnDetailClickListener(DeviceClickListener listener) {
         this.detailClickListener = listener;
@@ -73,9 +83,18 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
             
             holder.deviceAddressTextView.setText(deviceItem.getDeviceAddress());
             String deviceStatus = deviceItem.getDeviceStatus();
+
+            // 正在连的那一行：转圈 + 「● 正在连接」，不用等状态回调也知道点了有反应
+            boolean connecting = connectingAddress != null
+                    && connectingAddress.equalsIgnoreCase(deviceItem.getDeviceAddress())
+                    && !deviceItem.isConnected();
+            holder.deviceConnectingRing.setVisibility(connecting ? View.VISIBLE : View.GONE);
+            if (connecting) {
+                deviceStatus = holder.itemView.getContext().getString(R.string.列表_连接中文本);
+            }
             
-            // 行内只显示状态（详情页才有 profile 明细）。
-            // 状态单独占第三行：没有状态就 GONE，卡片变矮，上面两行（名字/地址）位置不动。
+            // 行内只显示状态（详情页才有 profile 明细）：状态靠右、贴着箭头左侧，垂直居中。
+            // 没有状态就 GONE，卡片缩成两行，名字和地址的位置不动。
             if (deviceStatus != null && !deviceStatus.isEmpty()) {
                 holder.deviceStatusTextView.setVisibility(View.VISIBLE);
                 // 一行字一个颜色：圆点在左、状态在右，「已连接」和「使用中」之间用竖线分隔，
@@ -169,6 +188,7 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
         TextView deviceAddressTextView;
         TextView deviceStatusTextView;
         TextView deviceRssiTextView;
+        ConnectingRingView deviceConnectingRing;
         ImageView deviceDetailImageView;
         
         public DeviceViewHolder(@NonNull View itemView) {
@@ -177,6 +197,7 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
             deviceAddressTextView = itemView.findViewById(R.id.deviceAddressTextView);
             deviceStatusTextView = itemView.findViewById(R.id.deviceStatusTextView);
             deviceRssiTextView = itemView.findViewById(R.id.deviceRssiTextView);
+            deviceConnectingRing = itemView.findViewById(R.id.deviceConnectingRing);
             deviceDetailImageView = itemView.findViewById(R.id.deviceDetailImageView);
         }
     }
