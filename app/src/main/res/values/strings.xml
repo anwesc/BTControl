@@ -126,6 +126,7 @@
     <string name="版本_稍后">稍后</string>
     <string name="版本_检查中">正在检查更新…</string>
     <string name="版本_检查失败">检查失败：%1$s</string>
+    <string name="版本_下载标题">下载更新包</string>
     <string name="版本_下载中">正在下载 %1$d%%（%2$s / %3$s）</string>
     <string name="版本_下载失败">下载失败：%1$s</string>
     <string name="版本_校验失败">更新包 SHA-256 与清单不一致，已丢弃</string>
@@ -134,7 +135,7 @@
     <string name="版本_静默安装">Shizuku 静默安装（不弹系统安装框）</string>
     <string name="版本_静默安装说明">Shizuku 未运行或未授权时自动退回系统安装器，需要用户点一下「更新」。</string>
     <string name="版本_自动检查">启动时自动检查更新（24 小时一次）</string>
-    <string name="版本_自动检查说明">只检查不自动装：发现新版本会弹一次确认，避免测试中途界面被换掉。</string>
+    <string name="版本_自动检查说明">只检查不自动装：发现新版本只在版本号旁点个红点，点开看公告再决定。</string>
     <string name="版本_更新源">更新源（version.json 地址）</string>
     <string name="版本_更新源说明">默认 GitHub Releases；内网或镜像可填自己的 version.json 完整地址。留空恢复默认。</string>
     <string name="版本_保存">保存</string>
@@ -146,4 +147,12 @@
     <string name="版本_没有下载器">没有浏览器/下载器可以打开更新地址</string>
     <string name="版本_安装失败">安装失败：%1$s</string>
     <string name="版本_入口">版本与更新</string>
+    <string name="版本_页_有新版本">发现新版本 v%1$s（%2$d）</string>
+    <string name="版本_页_最新">已是最新版本</string>
+    <string name="版本_页_检查中">正在检查更新…</string>
+    <string name="版本_公告">更新公告</string>
+    <string name="版本_版本变化">当前 v%1$s（%2$d） → 新版本 v%3$s（%4$d）</string>
+    <string name="版本_继续下载">继续下载 %1$d%%（%2$s / %3$s）</string>
+    <string name="版本_红点">有新版本可更新</string>
+    <string name="版本_安装包校验失败">安装包校验没通过：%1$s</string>
 </resources>

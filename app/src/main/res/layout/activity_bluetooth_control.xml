@@ -121,13 +121,16 @@
     <!-- 版本入口：点一下看当前版本 / 检查更新 / 更新设置；给自动化留一个可见锚点 -->
     <TextView
         android:id="@+id/versionTextView"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
         android:background="?attr/selectableItemBackground"
         android:contentDescription="@string/版本_入口"
         android:gravity="center"
-        android:paddingTop="4dp"
-        android:paddingBottom="6dp"
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp"
         android:text="v3.2.0"
         android:textColor="?android:textColorSecondary"
         android:textSize="11sp" />

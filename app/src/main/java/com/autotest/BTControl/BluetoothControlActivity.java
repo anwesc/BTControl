@@ -104,6 +104,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
     private TextView versionTextView;        // 底部版本入口：点按看版本/检查更新，长按进更新设置
     /** 更新下载/安装的进度弹窗；同一时刻只允许一个。 */
     private AlertDialog updateDialog;
+    private AlertDialog updatePageDialog;
     private ImageView imageAccessibilitySettings; // 无障碍设置按钮
 
     // 整页只有一个列表：三块设备列表靠 ConcatAdapter 拼在一起，标题行也是 item
@@ -255,6 +256,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
         // 回到前台时刷新状态条：蓝牙/无障碍/profile 可能在别处被改过
         refreshBtctlBar();
+        refreshVersionDot();
         scheduleSavedDeviceRefresh();
     }
 
@@ -447,6 +449,27 @@ public class BluetoothControlActivity extends AppCompatActivity {
         }
         String name = UpdateManager.currentVersionName(this);
         versionTextView.setText(name.isEmpty() ? getString(R.string.版本_未知) : "v" + name);
+        refreshVersionDot();
+    }
+
+    /**
+     * 有新版本只在入口上点一个红点，不弹窗——测试途中最烦的就是界面被系统对话框打断。
+     * 待安装清单在装好后自动失效（当前版本已经不低于它），所以从安装器回来后红点会自己消失。
+     */
+    private void refreshVersionDot() {
+        if (versionTextView == null) {
+            return;
+        }
+        boolean has = UpdateManager.pendingManifest(this) != null;
+        versionTextView.setCompoundDrawablesWithIntrinsicBounds(
+                0, 0, has ? R.drawable.update_dot : 0, 0);
+        versionTextView.setCompoundDrawablePadding(has ? dpToPx(6) : 0);
+        versionTextView.setContentDescription(has
+                ? getString(R.string.版本_红点) : getString(R.string.版本_入口));
+    }
+
+    private int dpToPx(int value) {
+        return Math.round(getResources().getDisplayMetrics().density * value);
     }
 
     /**
@@ -905,8 +928,9 @@ public class BluetoothControlActivity extends AppCompatActivity {
         return "检查更新".equals(action) || "更新".equals(action);
     }
 
-    /** 手动打开 App 时的静默自检：有新版才弹确认，网络失败只记日志、不打扰。 */
+    /** 手动打开 App 时的静默自检：只更新入口红点，绝不弹窗；网络失败只记日志。 */
     private void autoCheckOnLaunch() {
+        UpdateManager.cleanupCache(this);
         Intent it = getIntent();
         if (it != null && it.getStringExtra("auto_action") != null) {
             return;
@@ -919,25 +943,117 @@ public class BluetoothControlActivity extends AppCompatActivity {
                 Log.d(TAG, "自动检查更新失败: " + result.error);
                 return;
             }
-            if (result.installable(Build.VERSION.SDK_INT)) {
-                showUpdatePrompt(result);
-            }
+            applyCheckResult(result, false);
         });
     }
 
-    /** 底部版本入口弹窗：当前版本 + 检查更新 + 设置。 */
+    /** 把检查结果落到「待安装清单 + 红点」上；refreshPage 时顺手重绘已打开的更新页。 */
+    private void applyCheckResult(UpdateManager.CheckResult result, boolean refreshPage) {
+        if (result.error != null) {
+            // 网络抖动不清掉已知的新版本公告，免得红点闪一下又没了
+            if (refreshPage) {
+                renderUpdatePage(result);
+            }
+            return;
+        }
+        if (result.installable(Build.VERSION.SDK_INT)) {
+            UpdateManager.setPending(this, result.manifest);
+        } else {
+            UpdateManager.clearPending(this);
+        }
+        refreshVersionDot();
+        if (refreshPage) {
+            renderUpdatePage(result);
+        }
+    }
+
+    /** 更新页：当前版本 + 更新公告 + 立即更新；打开时顺手静默刷新一次。 */
     private void showVersionDialog() {
-        int code = UpdateManager.currentVersionCode(this);
-        String name = UpdateManager.currentVersionName(this);
-        String summary = getString(R.string.版本_摘要, UpdateManager.manifestUrl(this),
-                UpdateManager.autoCheck(this) ? getString(R.string.版本_自动开) : getString(R.string.版本_自动关));
-        new AlertDialog.Builder(this)
+        if (updatePageDialog != null && updatePageDialog.isShowing()) {
+            return;
+        }
+        View content = getLayoutInflater().inflate(R.layout.dialog_update_info, null);
+        updatePageStatusView = content.findViewById(R.id.updatePageStatus);
+        updatePageCurrentView = content.findViewById(R.id.updatePageCurrent);
+        updatePageChangelogView = content.findViewById(R.id.updatePageChangelog);
+        updatePageTransitionView = content.findViewById(R.id.updatePageTransition);
+        renderUpdatePage(null);
+        updatePageDialog = new AlertDialog.Builder(this)
                 .setTitle(R.string.版本_入口)
-                .setMessage(getString(R.string.版本_当前, name, code) + "\n\n" + summary)
-                .setPositiveButton(R.string.版本_检查更新, (d, w) -> checkForUpdateManually())
-                .setNeutralButton(R.string.版本_设置, (d, w) -> showUpdateSettings())
+                .setView(content)
+                .setPositiveButton(R.string.版本_立即更新, null)
+                .setNeutralButton(R.string.版本_设置, null)
                 .setNegativeButton(R.string.版本_关闭, null)
-                .show();
+                .create();
+        // 按钮自己接管：检查完/装完都留在这一页，别把用户弹来弹去
+        updatePageDialog.setOnShowListener(d -> {
+            updatePageDialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                    .setOnClickListener(v -> onUpdatePagePrimary());
+            updatePageDialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+                    .setOnClickListener(v -> showUpdateSettings());
+        });
+        updatePageDialog.show();
+        checkForUpdateManually();
+    }
+
+    /** 更新页主按钮：有公告就直接装，没有就先查。 */
+    private void onUpdatePagePrimary() {
+        UpdateManifest pending = UpdateManager.pendingManifest(this);
+        if (pending == null) {
+            checkForUpdateManually();
+            return;
+        }
+        dismissUpdatePage();
+        startUpdate(pending);
+    }
+
+    /** 重绘更新页：状态行 / 当前版本 / 公告 / 版本变化 / 主按钮文字。 */
+    private void renderUpdatePage(UpdateManager.CheckResult result) {
+        if (updatePageStatusView == null) {
+            return;
+        }
+        String curName = UpdateManager.currentVersionName(this);
+        long curCode = UpdateManager.currentVersionCode(this);
+        updatePageCurrentView.setText(getString(R.string.版本_当前, curName, curCode));
+        UpdateManifest m = UpdateManager.pendingManifest(this);
+        if (m == null && result != null && result.error == null && result.available) {
+            UpdateManager.setPending(this, result.manifest);
+            m = result.manifest;
+            refreshVersionDot();
+        }
+        if (m != null) {
+            updatePageStatusView.setText(getString(R.string.版本_页_有新版本, m.versionName, m.versionCode));
+            updatePageChangelogView.setText(m.changelog.isEmpty()
+                    ? getString(R.string.版本_无更新说明) : m.changelog);
+            updatePageTransitionView.setText(getString(R.string.版本_版本变化,
+                    curName, curCode, m.versionName, m.versionCode));
+        } else if (result != null && result.error != null) {
+            updatePageStatusView.setText(getString(R.string.版本_检查失败, result.error));
+            updatePageChangelogView.setText(getString(R.string.版本_无更新说明));
+            updatePageTransitionView.setText("");
+        } else {
+            updatePageStatusView.setText(result == null
+                    ? getString(R.string.版本_页_检查中) : getString(R.string.版本_页_最新));
+            updatePageChangelogView.setText(getString(R.string.版本_无更新说明));
+            updatePageTransitionView.setText("");
+        }
+        if (updatePageDialog != null) {
+            Button positive = updatePageDialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            if (positive != null) {
+                positive.setText(m != null ? R.string.版本_立即更新 : R.string.版本_检查更新);
+            }
+        }
+    }
+
+    private void dismissUpdatePage() {
+        if (updatePageDialog != null) {
+            try {
+                updatePageDialog.dismiss();
+            } catch (Throwable ignored) {
+                // 已销毁
+            }
+            updatePageDialog = null;
+        }
     }
 
     /** 更新设置：自动检查 / Shizuku 静默安装 / 更新源。 */
@@ -974,24 +1090,23 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
     private void checkForUpdateManually() {
         ToastUtils.showShort(this, getString(R.string.版本_检查中));
+        if (updatePageStatusView != null) {
+            updatePageStatusView.setText(R.string.版本_页_检查中);
+        }
         UpdateManager.check(this, result -> {
             if (isFinishing() || isDestroyed()) {
                 return;
             }
-            if (result.error != null) {
-                showUpdateDialog(getString(R.string.版本_检查失败, result.error));
+            if (result.error == null && result.available
+                    && result.manifest.requiresNewerSdk(Build.VERSION.SDK_INT)) {
+                if (updatePageStatusView != null) {
+                    updatePageStatusView.setText("新版本 v" + result.manifest.versionName
+                            + " 要求 Android SDK " + result.manifest.minSdk
+                            + "，当前设备是 " + Build.VERSION.SDK_INT);
+                }
                 return;
             }
-            if (!result.available) {
-                showUpdateDialog(getString(R.string.版本_已是最新, result.currentVersionName));
-                return;
-            }
-            if (result.manifest.requiresNewerSdk(Build.VERSION.SDK_INT)) {
-                showUpdateDialog("新版本 v" + result.manifest.versionName + " 要求 Android SDK "
-                        + result.manifest.minSdk + "，当前设备是 " + Build.VERSION.SDK_INT);
-                return;
-            }
-            showUpdatePrompt(result);
+            applyCheckResult(result, updatePageDialog != null && updatePageDialog.isShowing());
         });
     }
 
@@ -1000,20 +1115,6 @@ public class BluetoothControlActivity extends AppCompatActivity {
                 .setTitle(R.string.版本_入口)
                 .setMessage(message)
                 .setPositiveButton(android.R.string.ok, null)
-                .show();
-    }
-
-    /** 发现新版本：只弹一次确认，绝不静默替换——测试中途换掉界面比不更新更糟。 */
-    private void showUpdatePrompt(UpdateManager.CheckResult result) {
-        UpdateManifest m = result.manifest;
-        String message = getString(R.string.版本_更新说明,
-                m.changelog.isEmpty() ? getString(R.string.版本_无更新说明) : m.changelog,
-                result.currentVersionName, result.currentVersionCode, m.versionName, m.versionCode);
-        new AlertDialog.Builder(this)
-                .setTitle(getString(R.string.版本_发现新版本, m.versionName))
-                .setMessage(message)
-                .setPositiveButton(R.string.版本_立即更新, (d, w) -> startUpdate(m))
-                .setNegativeButton(R.string.版本_稍后, null)
                 .show();
     }
 
@@ -1038,12 +1139,18 @@ public class BluetoothControlActivity extends AppCompatActivity {
                     .show();
             return;
         }
-        showUpdateProgress(getString(R.string.版本_下载中, 0, "0 B", formatSize(m.size)));
+        showUpdateProgress(getString(R.string.版本_下载标题));
+        final boolean[] resumed = {false};
         UpdateManager.download(this, m, new UpdateManager.DownloadCallback() {
             @Override
             public void onProgress(long done, long total) {
-                updateProgressLine(getString(R.string.版本_下载中,
-                        percentOf(done, total), formatSize(done), formatSize(total)), percentOf(done, total));
+                if (!resumed[0] && done > 0) {
+                    // 第一次回调就带着已下载字节 → 这次是接着上次下的
+                    resumed[0] = true;
+                }
+                int percent = percentOf(done, total);
+                updateProgressLine(getString(resumed[0] ? R.string.版本_继续下载 : R.string.版本_下载中,
+                        percent, formatSize(done), formatSize(total)), percent);
             }
 
             @Override
@@ -1052,6 +1159,13 @@ public class BluetoothControlActivity extends AppCompatActivity {
                     dismissUpdateDialog();
                     ToastUtils.showLong(BluetoothControlActivity.this,
                             getString(R.string.版本_下载失败, friendlyDownloadError(error)));
+                    return;
+                }
+                String bad = UpdateManager.verifyApk(BluetoothControlActivity.this, apk, m);
+                if (bad != null) {
+                    dismissUpdateDialog();
+                    ToastUtils.showLong(BluetoothControlActivity.this,
+                            getString(R.string.版本_安装包校验失败, bad));
                     return;
                 }
                 setUpdateProgressTitle(getString(R.string.版本_下载完成));
@@ -1082,6 +1196,11 @@ public class BluetoothControlActivity extends AppCompatActivity {
     }
 
     // ---- 进度弹窗 ----
+
+    private TextView updatePageStatusView;
+    private TextView updatePageCurrentView;
+    private TextView updatePageChangelogView;
+    private TextView updatePageTransitionView;
 
     private ProgressBar updateProgressBar;
     private TextView updateProgressTitleView;
@@ -1148,6 +1267,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
                 return;
             }
             if ("检查更新".equals(action)) {
+                // 自动化检查也把结果落成红点，人手打开就能看到公告
+                applyCheckResult(result, false);
                 emitUpdateResult(action, true, "", updateInfo(result, "checked"));
                 return;
             }
@@ -1161,6 +1282,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
                         + "，当前 " + Build.VERSION.SDK_INT, updateInfo(result, "checked"));
                 return;
             }
+            applyCheckResult(result, false);
             boolean silent = UpdateManager.silentInstall(this) && "ok".equals(ShizukuBridge.status());
             if (!silent && !UpdateManager.hasInstallPermission(this)) {
                 emitUpdateResult(action, false, "needs_install_permission: 允许安装未知应用，"
@@ -1184,6 +1306,11 @@ public class BluetoothControlActivity extends AppCompatActivity {
             public void onFinished(File apk, String error) {
                 if (error != null) {
                     emitUpdateResult(action, false, "download_failed: " + error, updateInfo(result, "checked"));
+                    return;
+                }
+                String bad = UpdateManager.verifyApk(BluetoothControlActivity.this, apk, result.manifest);
+                if (bad != null) {
+                    emitUpdateResult(action, false, "apk_verify_failed: " + bad, updateInfo(result, "checked"));
                     return;
                 }
                 boolean silent = UpdateManager.silentInstall(BluetoothControlActivity.this)

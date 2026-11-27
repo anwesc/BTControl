@@ -427,7 +427,7 @@ Shizuku 没起/没授权时，`--via shizuku` 会明确回 `shizuku_not_running`
 
 ### 版本号怎么来
 
-- 默认值在 `gradle.properties`：`btcontrol.versionName=3.2.0`、`btcontrol.versionCode=3002000`
+- 默认值在 `gradle.properties`：`btcontrol.versionName=3.3.0`、`btcontrol.versionCode=3003000`
 - CI 打 tag 时用 `-Pbtcontrol.versionName=… -Pbtcontrol.versionCode=…` 覆盖
 - `versionCode` 规则固定：`major*1000000 + minor*1000 + patch`（3.2.0 → 3002000，3.10.1 → 3010001），
   保证 Android 的「新版本覆盖旧版本」判断与语义版本一致
@@ -435,11 +435,11 @@ Shizuku 没起/没授权时，`--via shizuku` 会明确回 `shizuku_not_running`
 ### 打一版（GitHub Actions）
 
 ```bash
-git tag v3.2.0 && git push origin v3.2.0
+git tag v3.3.0 && git push origin v3.3.0
 ```
 
 `release` workflow 会：构建 `assembleRelease` → 生成 `version.json` → 建 GitHub Release，
-上传两个资产：`BTControl_v3.2.0.apk`、`version.json`。也可以在 Actions 页面手动触发并填版本号。
+上传两个资产：`BTControl_v3.3.0.apk`、`version.json`。也可以在 Actions 页面手动触发并填版本号。
 
 `ci` workflow 在 push / PR 时只跑 `assembleDebug`，防止「打 tag 了才发现编不过」。
 
@@ -447,9 +447,9 @@ git tag v3.2.0 && git push origin v3.2.0
 
 ```json
 {
-  "versionCode": 3002000,
-  "versionName": "3.2.0",
-  "apkUrl": "https://github.com/anwesc/BTControl/releases/download/v3.2.0/BTControl_v3.2.0.apk",
+  "versionCode": 3003000,
+  "versionName": "3.3.0",
+  "apkUrl": "https://github.com/anwesc/BTControl/releases/download/v3.3.0/BTControl_v3.3.0.apk",
   "sha256": "…64 位小写 hex…",
   "size": 2300465,
   "minSdk": 27,
@@ -463,10 +463,19 @@ git tag v3.2.0 && git push origin v3.2.0
 ### App 内怎么更新
 
 - 默认更新源：`https://github.com/anwesc/BTControl/releases/latest/download/version.json`
-- 入口：界面底部那行版本号。**点一下**＝检查更新，**长按**＝更新设置（自动检查开关、静默安装开关、更新源地址）
+- 入口：界面底部那行版本号。**点一下**＝打开「版本与更新」页，**长按**＝更新设置（自动检查开关、静默安装开关、更新源地址）
 - 手动打开 App 时自动检查（默认开，24 小时内只查一次；带 `auto_action` 启动不查，不干扰自动化）
-- 流程：拉清单 → 比 `versionCode` → 弹更新说明（不静默替换）→ 下载到 `cacheDir/updates/` → 校验
-  `sha256` + `size` → 安装
+- **发现新版本只点红点，不弹窗**：版本号右边出现一个红点，测试过程不会被对话框打断。
+  点版本号打开更新页，能看到更新公告（changelog）、当前版本 → 新版本，以及「立即更新」按钮。
+  红点状态存在 SharedPreferences 的 `pending_json` 里，安装成功后当前版本已不低于它，红点自动消失。
+- 流程：拉清单 → 比 `versionCode` → 存一份待安装清单（点红点）→ 下载到 `cacheDir/updates/` →
+  校验 `sha256` + `size` → 安装前再校验安装包本身 → 安装
+- **断点续传**：下载先写 `BTControl_v<版本>.apk.part`，中断后下次发 `Range: bytes=<已下载>-` 接着下；
+  服务器不支持 Range（回 200）就自动从头重下。sha256/size 不符时删掉 `.part`，避免拿坏数据反复重试。
+- **安装包校验**（`UpdateManager.verifyApk`）：包名必须是本 App、`versionCode` 必须等于清单声明且不低于当前、
+  签名 SHA-256 必须与已安装版本一致。任何一项不过就报 `apk_verify_failed: <原因>` 并放弃安装。
+- **安装包清理**：每次启动调 `UpdateManager.cleanupCache`，只留待安装版本（`pending_json`）的 `.apk`/`.apk.part`，
+  旧版本包和过期断点全部删掉；装完之后待安装清单失效，缓存随之清空。
 - 安装两条路：
   1. **Shizuku 静默**（默认开、Shizuku 已授权时）：`pm install -r -d -S <size>`，APK 从 stdin 流进 `pm`。
      应用私有目录 shell 读不到，所以必须走 stdin，不能传路径。装完进程被替换，等不到回执。
@@ -500,7 +509,11 @@ adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
 | `manifest_url` | 这次用的清单地址 |
 
 失败原因都是可读串：`check_failed: …`、`download_failed: …`、`sha256_mismatch: …`、`size_mismatch`、
-`needs_install_permission`、`install_failed: …`、`shizuku_install_failed: …`、`requires_newer_sdk`。
+`needs_install_permission`、`install_failed: …`、`shizuku_install_failed: …`、`requires_newer_sdk`，
+以及安装包校验的细分原因：`apk_verify_failed: apk_missing` / `apk_unreadable` / `apk_package_mismatch: <包名>` /
+`apk_versioncode_older: <包内>/<当前>` / `apk_versioncode_mismatch: <包内>/<清单>` / `apk_signature_mismatch`。
+
+`auto_action "检查更新"` 也会把结果落成红点，方便「自动化查一次、人手打开看公告」的用法。
 
 不走 Shizuku 时系统安装器会先回一个 `STATUS_PENDING_USER_ACTION`（数值 `-1`）：这不是失败，而是「确认框交给你自己拉起」。
 `InstallResultReceiver` 会从 `Intent.EXTRA_INTENT` 取出确认 Intent 并 `startActivity`，同时回一条

@@ -86,4 +86,22 @@ public final class UpdateManifest {
     public boolean requiresNewerSdk(int deviceSdk) {
         return minSdk > 0 && minSdk > deviceSdk;
     }
+
+    /** 存进 SharedPreferences 用：清单原样序列化，红点状态重启后还在。 */
+    public JSONObject toJson() {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("versionCode", versionCode);
+            o.put("versionName", versionName);
+            o.put("apkUrl", apkUrl);
+            o.put("sha256", sha256);
+            o.put("size", size);
+            o.put("minSdk", minSdk);
+            o.put("changelog", changelog == null ? "" : changelog);
+            o.put("publishedAt", publishedAt == null ? "" : publishedAt);
+        } catch (Exception ignored) {
+            // 固定 key 的 put 不会失败
+        }
+        return o;
+    }
 }

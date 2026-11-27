@@ -56,6 +56,7 @@ public final class UpdateManager {
     private static final String KEY_MANIFEST_URL = "manifest_url";
     private static final String KEY_AUTO_CHECK = "auto_check";
     private static final String KEY_SILENT_INSTALL = "silent_install";
+    private static final String KEY_PENDING_JSON = "pending_json";
     private static final String KEY_LAST_CHECK = "last_check_at";
 
     private static final long AUTO_CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000;
@@ -231,7 +232,13 @@ public final class UpdateManager {
 
     // ---------------------------------------------------------------- 下载
 
-    /** 下载到缓存目录并校验 SHA-256；回调在主线程（进度按 ~150ms 节流）。 */
+    /**
+     * 下载到缓存目录并校验 SHA-256；回调在主线程（进度按 ~150ms 节流）。
+     *
+     * <p>支持断点续传：上次中断留下的 {@code .part} 会被复用，用 HTTP Range 只取剩下的字节；
+     * 服务器不认 Range（回 200）就丢掉断点从头下。校验不过（SHA-256/size）会删掉断点，
+     * 免得每次重试都拿到同一份坏数据。
+     */
     public static void download(Context ctx, final UpdateManifest m, final DownloadCallback cb) {
         final Context app = ctx.getApplicationContext();
         IO.execute(() -> {
@@ -240,28 +247,46 @@ public final class UpdateManager {
                 finishDownload(cb, null, "mkdir_failed: " + dir);
                 return;
             }
+            cleanCache(app, m.versionName);
             File target = new File(dir, "BTControl_v" + m.versionName + ".apk");
             File part = new File(dir, target.getName() + ".part");
-            if (part.exists() && !part.delete()) {
-                finishDownload(cb, null, "清理旧下载失败: " + part);
-                return;
-            }
             HttpURLConnection conn = null;
             try {
-                conn = openConnection(m.apkUrl);
-                int code = conn.getResponseCode();
-                if (code < 200 || code >= 300) {
-                    throw new IllegalStateException("http_" + code);
-                }
-                long total = conn.getContentLengthLong();
-                if (total <= 0) {
-                    total = m.size;
+                long start = part.isFile() ? part.length() : 0;
+                if (start > 0 && m.size > 0 && start > m.size) {
+                    part.delete();
+                    start = 0;
                 }
                 MessageDigest md = MessageDigest.getInstance("SHA-256");
-                long done = 0;
+                if (start > 0) {
+                    Log.i(TAG, "断点续传：已有 " + start + " 字节，从断点继续");
+                    updateDigest(md, part);
+                }
+                conn = openConnection(m.apkUrl);
+                if (start > 0) {
+                    conn.setRequestProperty("Range", "bytes=" + start + "-");
+                }
+                int code = conn.getResponseCode();
+                if (start > 0 && code == 200) {
+                    // 服务器不支持 Range，或者远端文件换了：断点作废，整包重下
+                    Log.i(TAG, "服务器返回 200，放弃断点从头下载");
+                    part.delete();
+                    start = 0;
+                    md = MessageDigest.getInstance("SHA-256");
+                } else if (code != 200 && code != 206) {
+                    throw new IllegalStateException("http_" + code);
+                }
+                long total = m.size;
+                if (total <= 0) {
+                    long len = conn.getContentLengthLong();
+                    if (len > 0) {
+                        total = start + len;
+                    }
+                }
+                long done = start;
                 long lastReport = 0;
                 try (InputStream in = conn.getInputStream();
-                     OutputStream out = new FileOutputStream(part)) {
+                     OutputStream out = new FileOutputStream(part, start > 0)) {
                     byte[] buf = new byte[64 * 1024];
                     int n;
                     while ((n = in.read(buf)) > 0) {
@@ -299,8 +324,8 @@ public final class UpdateManager {
                 }
                 finishDownload(cb, target, null);
             } catch (Throwable t) {
+                // 保留 .part：下次进来还能接着下（校验失败的分支已经把它删了）
                 Log.w(TAG, "下载更新包失败", t);
-                part.delete();
                 finishDownload(cb, null, errorText(t));
             } finally {
                 if (conn != null) {
@@ -308,6 +333,43 @@ public final class UpdateManager {
                 }
             }
         });
+    }
+
+    // ---------------------------------------------------------------- 缓存清理
+
+    /** 启动时清一次：没有待安装版本就清空，有就只留它（旧的包和断点文件都删）。 */
+    public static void cleanupCache(Context ctx) {
+        cleanCache(ctx.getApplicationContext(), pendingVersionName(ctx));
+    }
+
+    private static void cleanCache(Context app, String keepVersionName) {
+        File dir = new File(app.getCacheDir(), "updates");
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return;
+        }
+        String keep = keepVersionName == null || keepVersionName.isEmpty()
+                ? null : "BTControl_v" + keepVersionName + ".apk";
+        for (File f : files) {
+            if (keep != null && (f.getName().equals(keep) || f.getName().equals(keep + ".part"))) {
+                continue;
+            }
+            boolean ok = f.isDirectory() ? deleteTree(f) : f.delete();
+            if (!ok) {
+                Log.w(TAG, "清理更新缓存失败: " + f);
+            }
+        }
+    }
+
+    private static boolean deleteTree(File dir) {
+        File[] children = dir.listFiles();
+        boolean ok = true;
+        if (children != null) {
+            for (File c : children) {
+                ok &= c.isDirectory() ? deleteTree(c) : c.delete();
+            }
+        }
+        return ok && dir.delete();
     }
 
     // ---------------------------------------------------------------- 安装
@@ -319,6 +381,12 @@ public final class UpdateManager {
     public static void install(Context ctx, final File apk, final InstallCallback cb) {
         final Context app = ctx.getApplicationContext();
         IO.execute(() -> {
+            String bad = verifyApk(app, apk, null);
+            if (bad != null) {
+                Log.w(TAG, "安装包校验失败，拒绝安装: " + bad);
+                MAIN.post(() -> cb.onResult(bad));
+                return;
+            }
             if (silentInstall(app) && "ok".equals(ShizukuBridge.status())) {
                 String r = ShizukuBridge.installApk(apk);
                 if ("ok".equals(r)) {
@@ -388,6 +456,105 @@ public final class UpdateManager {
         }
     }
 
+    // ---------------------------------------------------------------- 安装包校验
+
+    /**
+     * 安装前校验 APK 是不是「我们的、更新的、签名一致的」包。
+     * 清单可以写错（比如填了旧包），装上去会变成降级或签名冲突，装之前先挡住。
+     *
+     * @param expect 期望的清单，可为 null（自动化里没读清单时只做基本校验）
+     * @return null 表示通过，否则是可直接展示的原因串
+     */
+    public static String verifyApk(Context ctx, File apk, UpdateManifest expect) {
+        try {
+            if (apk == null || !apk.isFile() || apk.length() == 0) {
+                return "apk_missing";
+            }
+            PackageManager pm = ctx.getPackageManager();
+            int flags = Build.VERSION.SDK_INT >= 28
+                    ? PackageManager.GET_SIGNING_CERTIFICATES
+                    : PackageManager.GET_SIGNATURES;
+            PackageInfo info = pm.getPackageArchiveInfo(apk.getAbsolutePath(), flags);
+            if (info == null) {
+                return "apk_unreadable";
+            }
+            if (!ctx.getPackageName().equals(info.packageName)) {
+                return "apk_package_mismatch: " + info.packageName;
+            }
+            long code = Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode;
+            if (code <= 0) {
+                return "apk_versioncode_invalid";
+            }
+            if (code < currentVersionCode(ctx)) {
+                return "apk_versioncode_older: " + code + "/" + currentVersionCode(ctx);
+            }
+            if (expect != null && expect.versionCode > 0 && code != expect.versionCode) {
+                return "apk_versioncode_mismatch: " + code + "/" + expect.versionCode;
+            }
+            String apkSig = firstSignature(info);
+            String selfSig = firstSignature(pm.getPackageInfo(ctx.getPackageName(), flags));
+            if (apkSig != null && selfSig != null && !apkSig.equals(selfSig)) {
+                return "apk_signature_mismatch";
+            }
+            return null;
+        } catch (Throwable t) {
+            Log.w(TAG, "安装包校验异常", t);
+            return "apk_verify_failed: " + errorText(t);
+        }
+    }
+
+    private static String firstSignature(PackageInfo info) {
+        try {
+            android.content.pm.Signature[] arr;
+            if (Build.VERSION.SDK_INT >= 28) {
+                if (info.signingInfo == null) {
+                    return null;
+                }
+                arr = info.signingInfo.hasMultipleSigners()
+                        ? info.signingInfo.getApkContentsSigners()
+                        : info.signingInfo.getSigningCertificateHistory();
+            } else {
+                arr = info.signatures;
+            }
+            if (arr == null || arr.length == 0) {
+                return null;
+            }
+            return hex(MessageDigest.getInstance("SHA-256").digest(arr[0].toByteArray()));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    // ---------------------------------------------------------------- 待安装版本（红点）
+
+    /** 记下「发现的新版本」：界面只在入口点个红点，不弹窗打扰。 */
+    public static void setPending(Context c, UpdateManifest m) {
+        prefs(c).edit().putString(KEY_PENDING_JSON, m.toJson().toString()).apply();
+    }
+
+    public static void clearPending(Context c) {
+        prefs(c).edit().remove(KEY_PENDING_JSON).apply();
+    }
+
+    /** 待安装清单；已经装上（当前版本已经不低于它）就返回 null，红点自动消失。 */
+    public static UpdateManifest pendingManifest(Context c) {
+        String json = prefs(c).getString(KEY_PENDING_JSON, null);
+        if (json == null || json.isEmpty()) {
+            return null;
+        }
+        try {
+            UpdateManifest m = UpdateManifest.fromJson(new JSONObject(json), manifestUrl(c));
+            return m.versionCode > currentVersionCode(c) ? m : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    public static String pendingVersionName(Context c) {
+        UpdateManifest m = pendingManifest(c);
+        return m == null ? null : m.versionName;
+    }
+
     // ---------------------------------------------------------------- 工具
 
     private static HttpURLConnection openConnection(String urlStr) throws Exception {
@@ -419,6 +586,16 @@ public final class UpdateManager {
             }
         } finally {
             ((HttpURLConnection) conn).disconnect();
+        }
+    }
+
+    private static void updateDigest(MessageDigest md, File f) throws Exception {
+        try (InputStream in = new FileInputStream(f)) {
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                md.update(buf, 0, n);
+            }
         }
     }
 
