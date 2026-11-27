@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设备行：名字（长了截断）+ 连接状态药丸 + 地址；右侧箭头只给已保存设备 -->
+<!--
+  设备行三行：名字 / 地址 / 状态。
+  状态单独一行且默认 GONE，出现或消失只让卡片变高变矮，名字和地址的位置永远不动。
+  整行点击 = 连接（未连接时）或断开（已连接时，先弹确认框）；右侧带底托的箭头进设备详情。
+-->
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -7,7 +11,10 @@
     android:layout_height="wrap_content"
     android:layout_margin="4dp"
     android:background="@drawable/device_item_complete_selector"
-    android:padding="12dp">
+    android:paddingStart="12dp"
+    android:paddingTop="10dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="10dp">
 
     <TextView
         android:id="@+id/deviceNameTextView"
@@ -19,74 +26,70 @@
         android:textSize="16sp"
         android:textStyle="bold"
         app:layout_constrainedWidth="true"
-        app:layout_constraintEnd_toStartOf="@id/deviceStatusTextView"
+        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
         app:layout_constraintHorizontal_bias="0"
-        app:layout_constraintHorizontal_chainStyle="packed"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- 状态药丸紧贴名字，不是贴在箭头旁边：状态属于设备，不属于入口 -->
+    <LinearLayout
+        android:id="@+id/deviceAddressRow"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/deviceNameTextView">
+
+        <TextView
+            android:id="@+id/deviceAddressTextView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="13sp"
+            tools:text="20:05:11:01:95:10" />
+
+        <!-- 信号强度：只有扫描到的周围设备有值 -->
+        <TextView
+            android:id="@+id/deviceRssiTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="11sp"
+            android:visibility="gone"
+            tools:text="-57 dBm" />
+    </LinearLayout>
+
     <TextView
         android:id="@+id/deviceStatusTextView"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:background="@drawable/status_pill"
-        android:paddingStart="7dp"
-        android:paddingTop="2dp"
-        android:paddingEnd="7dp"
-        android:paddingBottom="2dp"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:maxLines="1"
         android:textColor="@color/state_connected"
-        android:textSize="11sp"
-        app:layout_constraintBottom_toBottomOf="@id/deviceNameTextView"
-        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
-        app:layout_constraintStart_toEndOf="@id/deviceNameTextView"
-        app:layout_constraintTop_toTopOf="@id/deviceNameTextView" />
-
-    <TextView
-        android:id="@+id/deviceAddressTextView"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:textColor="?android:attr/textColorSecondary"
-        android:textSize="14sp"
-        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/deviceNameTextView" />
-
-    <TextView
-        android:id="@+id/deviceProfilesTextView"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:textColor="@android:color/holo_orange_dark"
-        android:textSize="11sp"
+        android:textSize="12sp"
         android:visibility="gone"
         app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/deviceAddressTextView" />
+        app:layout_constraintTop_toBottomOf="@id/deviceAddressRow"
+        tools:text="使用中"
+        tools:visibility="visible" />
 
-    <!-- 信号强度：只在扫描到的周围设备行显示（已保存设备不登记 RSSI，自动隐藏） -->
-    <TextView
-        android:id="@+id/deviceRssiTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:textColor="?android:attr/textColorSecondary"
-        android:textSize="11sp"
-        android:visibility="gone"
-        app:layout_constraintBottom_toBottomOf="@id/deviceAddressTextView"
-        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
-        tools:ignore="HardcodedText" />
-
-    <!-- 右侧箭头：只有「已保存设备」会显示，整行点击也进详情页，它只是个可见的入口提示 -->
+    <!-- 右侧箭头：带一颗圆角底托，明确「这块是单独按钮（进详情）」，和整行的连接/断开区分开 -->
     <ImageView
         android:id="@+id/deviceDetailImageView"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_marginStart="4dp"
-        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@drawable/chevron_tray"
         android:contentDescription="@string/设备_进入详情"
+        android:foreground="?android:attr/selectableItemBackgroundBorderless"
         android:padding="8dp"
         android:src="@drawable/ic_chevron_right"
         android:visibility="gone"

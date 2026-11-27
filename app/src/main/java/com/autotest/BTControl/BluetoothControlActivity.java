@@ -19,6 +19,9 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -54,6 +57,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.autotest.BTControl.adapters.BluetoothDeviceAdapter;
 import com.autotest.BTControl.adapters.SectionHeaderAdapter;
+import com.autotest.BTControl.utils.AudioRoute;
 import com.autotest.BTControl.utils.BluetoothOperationUtils;
 import com.autotest.BTControl.utils.BluetoothDiscoveryUtils;
 import com.autotest.BTControl.utils.BtctlReporter;
@@ -185,6 +189,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
     /** 主线程 Handler，用于「已保存设备」刷新防抖。 */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    /** 音频路由回调：放歌/暂停/通话切换会走这里，用来把「使用中」刷新出来。 */
+    private AudioDeviceCallback audioRouteCallback;
 
     /** 防抖后的刷新动作：多次状态广播合并成一次重建。 */
     private final Runnable savedDeviceRefreshRunnable = this::updateSavedDeviceList;
@@ -259,6 +265,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
         refreshVersionDot();
         refreshKeyStatus();
         scheduleSavedDeviceRefresh();
+        registerAudioRouteCallback();
         resumed = true;
     }
 
@@ -266,6 +273,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         resumed = false;
+        unregisterAudioRouteCallback();
 
         // 这里刻意不停扫描、也不注销接收器：AI 用 adb 触发扫描时界面经常被切到后台，
         // 在 onPause 收摊就等于「扫到一半变聋」。收摊统一放到 onDestroy 的 cleanup()。
@@ -506,7 +514,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
         // 已保存设备：行内没有别的点击行为，整行都进详情页（只有箭头能点的话，点名字会像没反应）；
         // 长按仍是设备操作面板（取消配对）
         SavedDeviceListAdapter = createBluetoothDeviceAdapter(SavedDeviceList,
-            (position, deviceItem) -> DeviceDetailActivity.start(this, deviceItem.getDeviceAddress()),
+            (position, deviceItem) -> onSavedDeviceRowClick(deviceItem),
             (position, deviceItem) -> confirmUnpairDevice(deviceItem));
         SavedDeviceListAdapter.setOnDetailClickListener(
             (position, deviceItem) -> DeviceDetailActivity.start(this, deviceItem.getDeviceAddress()));
@@ -1841,6 +1849,43 @@ public class BluetoothControlActivity extends AppCompatActivity {
     }
 
     /**
+     * 点已保存设备整行：照系统蓝牙页的习惯——没连就直接连，连着就确认后断开。
+     * 详情页走右侧带底托的箭头，长按仍是取消配对。
+     */
+    @SuppressLint("MissingPermission")
+    private void onSavedDeviceRowClick(BluetoothDeviceAdapter.BluetoothDeviceItem deviceItem) {
+        final BluetoothDevice device = deviceItem.getBluetoothDevice();
+        if (device == null) {
+            return;
+        }
+        if (deviceItem.isConnected()) {
+            confirmDisconnectDevice(device);
+        } else {
+            connectToDevice(device);
+        }
+    }
+
+    /** 断开会断掉正在放的歌，所以先问一句；连不需要确认，点了就连。 */
+    @SuppressLint("MissingPermission")
+    private void confirmDisconnectDevice(BluetoothDevice device) {
+        String name;
+        try {
+            name = device.getName();
+        } catch (SecurityException e) {
+            name = null;
+        }
+        final String title = (name == null || name.isEmpty()) ? device.getAddress() : name;
+        androidx.appcompat.app.AlertDialog dialog = new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.列表_断开标题)
+                .setMessage(getString(R.string.列表_断开正文, title))
+                .setPositiveButton(R.string.列表_断开, (d, which) -> disconnectDevice(device))
+                .setNegativeButton(R.string.详情_取消, null)
+                .create();
+        dialog.show();
+        tintDestructiveButton(dialog);
+    }
+
+    /**
      * 长按已保存设备：直接确认「取消配对」。
      *
      * <p>CDM 关联入口已经在设备详情页的「CDM 关联」行，长按不再叠一层操作面板。
@@ -2900,8 +2945,10 @@ public class BluetoothControlActivity extends AppCompatActivity {
         boolean isConnected = connectionInfo.isConnected;
 
         if (isConnected) {
-            // 行里只留一个状态点，连接配置（A2DP/HFP/LE Audio）在详情页看
-            statusText = "已连接";
+            // 「已连接」是基本状态，永远显示；「使用中」只是附加信息：
+            // 音频路由真的落在这台设备上（系统蓝牙设置里的 Active）时补一句，不带它才是没在放音
+            statusText = AudioRoute.isActiveOutput(this, device.getAddress())
+                    ? "● 已连接 | 使用中" : "● 已连接";
             profilesText = null;
         } else {
             // 未连接设备不显示状态字符串
@@ -2923,6 +2970,40 @@ public class BluetoothControlActivity extends AppCompatActivity {
             statusTextView.setText("蓝牙已关闭".equals(status) ? status + " · 点按开启" : status);
         }
         Log.d(TAG, status);
+    }
+
+    /** 音频路由变化（放歌、暂停、通话切换、拔掉耳机）都刷新一次已保存列表。 */
+    private void registerAudioRouteCallback() {
+        if (audioRouteCallback != null) {
+            return;
+        }
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) {
+            return;
+        }
+        audioRouteCallback = new AudioDeviceCallback() {
+            @Override
+            public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                scheduleSavedDeviceRefresh();
+            }
+
+            @Override
+            public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                scheduleSavedDeviceRefresh();
+            }
+        };
+        am.registerAudioDeviceCallback(audioRouteCallback, mainHandler);
+    }
+
+    private void unregisterAudioRouteCallback() {
+        if (audioRouteCallback == null) {
+            return;
+        }
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (am != null) {
+            am.unregisterAudioDeviceCallback(audioRouteCallback);
+        }
+        audioRouteCallback = null;
     }
 
     /** 蓝牙关着的时候点一下顶部小字就直接开，回到前台就能扫。 */

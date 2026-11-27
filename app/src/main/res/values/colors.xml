@@ -36,6 +36,7 @@
 
     <!-- 设备详情页的语义色：绿=已连接/正常，橙=过渡中/待处理，灰=断开/不支持 -->
     <color name="state_connected">#2E7D32</color>
+    <color name="state_online">#1E88E5</color> <!-- 已连接状态文字：比主色浅一档的蓝，长文本更透气 -->
     <color name="state_transition">#EF6C00</color>
     <color name="state_disconnected">#757575</color>
     <color name="banner_warning_bg">#33FF9800</color>

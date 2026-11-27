@@ -32,6 +32,7 @@
     <color name="surface_card">#1E1E1E</color> <!-- 夜间卡片底（比页面亮一级） -->
     <color name="state_disconnected">#9E9E9E</color> <!-- 夜间未连接文字（提亮保证对比度） -->
     <color name="state_connected">#81C784</color> <!-- 夜间已连接绿 -->
+    <color name="state_online">#64B5F6</color> <!-- 夜间已连接状态文字：浅蓝，深底上对比更稳 -->
     <color name="state_transition">#FFB74D</color> <!-- 夜间过渡橙 --> <!-- 夜间正常芯片底 --> <!-- 夜间正常芯片字 --> <!-- 夜间警示芯片底 --> <!-- 夜间警示芯片字 --> <!-- 夜间中性芯片底 --> <!-- 夜间中性芯片字 -->
 
     <color name="action_destructive">#CF6679</color> <!-- 破坏性操作（取消配对等） -->

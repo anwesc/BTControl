@@ -10,6 +10,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.autotest.BTControl.R;
@@ -73,14 +74,23 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
             holder.deviceAddressTextView.setText(deviceItem.getDeviceAddress());
             String deviceStatus = deviceItem.getDeviceStatus();
             
-            // 行内只显示状态（详情页才有 profile 明细）
+            // 行内只显示状态（详情页才有 profile 明细）。
+            // 状态单独占第三行：没有状态就 GONE，卡片变矮，上面两行（名字/地址）位置不动。
             if (deviceStatus != null && !deviceStatus.isEmpty()) {
                 holder.deviceStatusTextView.setVisibility(View.VISIBLE);
+                // 一行字一个颜色：圆点在左、状态在右，「已连接」和「使用中」之间用竖线分隔，
+                // 免得两个词两种颜色显得像两条独立信息
                 holder.deviceStatusTextView.setText(deviceStatus);
+                int colorRes = R.color.state_transition;
+                if (deviceStatus.contains("已连接") || deviceStatus.contains("使用中")) {
+                    colorRes = R.color.state_online;
+                }
+                holder.deviceStatusTextView.setTextColor(
+                        ContextCompat.getColor(holder.itemView.getContext(), colorRes));
             } else {
+                holder.deviceStatusTextView.setText("");
                 holder.deviceStatusTextView.setVisibility(View.GONE);
             }
-            holder.deviceProfilesTextView.setVisibility(View.GONE);
 
             // 信号强度：扫描到的周围设备才有值，已保存设备一直是 RSSI_UNKNOWN
             if (deviceItem.getRssi() != ScanAdvertCache.RSSI_UNKNOWN) {
@@ -158,7 +168,6 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
         TextView deviceNameTextView;
         TextView deviceAddressTextView;
         TextView deviceStatusTextView;
-        TextView deviceProfilesTextView;
         TextView deviceRssiTextView;
         ImageView deviceDetailImageView;
         
@@ -167,7 +176,6 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
             deviceNameTextView = itemView.findViewById(R.id.deviceNameTextView);
             deviceAddressTextView = itemView.findViewById(R.id.deviceAddressTextView);
             deviceStatusTextView = itemView.findViewById(R.id.deviceStatusTextView);
-            deviceProfilesTextView = itemView.findViewById(R.id.deviceProfilesTextView);
             deviceRssiTextView = itemView.findViewById(R.id.deviceRssiTextView);
             deviceDetailImageView = itemView.findViewById(R.id.deviceDetailImageView);
         }

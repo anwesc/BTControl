@@ -223,7 +223,7 @@ adb shell cmd companiondevice disassociate 0 com.autotest.BTControl 20:05:11:01:
 
 ### 设备详情页（3.1.0+）
 
-列表行只留两行字：名字（后面紧跟连接状态），以及地址——已连接的设备在名字后面挂一枚绿色 `已连接` 小药丸（`status_pill` 底 + `state_connected` 字，夜间底色 `#1B3A1E`、文字提亮成 `#81C784`），名字太长时名字自己省略号截断、药丸始终贴着名字；没连接就不显示，别占位。已保存设备行右侧保留 `›` 箭头（`deviceDetailImageView`，周围设备/非常用设备不显示），**整行点击都进 `DeviceDetailActivity`**（行内没有别的点击行为，只让 40dp 箭头能点会让人以为点不动），长按仍是设备操作面板（取消配对）。
+列表行三行字：名字（16sp 粗体，长了省略号截断）；第二行「地址 + 信号强度」（地址过长也截断，右侧 dBm 只在扫描到的周围设备上有）；第三行状态——连上过才有，没状态时整行 `GONE`，所以断开后卡片会自己缩回两行。状态是彩色小字，统一用比主色浅一档的蓝 `state_online`（白天 `#1E88E5`、夜间 `#64B5F6`），文案是 `● 已连接` 或 `● 已连接 | 使用中`（圆点+竖线一行的写法，避免两段不同颜色看起来像两条独立信息）。「使用中」= 音频路由真的落在这台设备上（系统蓝牙设置里的 Active）：通话看 `AudioManager.getCommunicationDevice()`，媒体看 `isBluetoothA2dpOn()` + 当前只有它这一台 A2DP 输出（`utils/AudioRoute.java`），并通过 `AudioDeviceCallback` 在插拔/切换音频设备时自动刷新列表。右侧 `›` 箭头（`deviceDetailImageView`，周围设备/非常用设备不显示）放在 `chevron_tray` 圆角底托里，视觉上明确是「进详情」的入口；**整行点击是连接/断开**——未连接直接连，已连接先弹「断开连接？」确认（照系统蓝牙页的习惯），箭头仍只负责进 `DeviceDetailActivity`，长按仍是设备操作面板（取消配对）。
 详情页版式按卡片分组，从上到下是：概览卡（名字 / MAC / 「取消配对」描边按钮 + 「连接·断开」主按钮，取消配队在左 / 最后刷新时间）→ 连接配置卡（A2DP / HFP / LE Audio 三行，名字 + 状态 + 开关；末尾一行 CDM 关联）→ 底部工具（复制快照 JSON）与结果行。
 
 - 顶部是 MaterialToolbar（返回箭头 + 「设备详情」，`colorPrimary` 蓝底白字），返回键直接 `finish()`，不用再靠系统返回手势。
