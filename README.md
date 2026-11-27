@@ -126,7 +126,7 @@ adb shell cat /sdcard/Android/data/com.autotest.BTControl/files/btctl_result.jso
 
 ### 顶部状态条 / 底部回执条分工（3.3.1+）
 
-顶部一行字（`statusTextView`）只挂「不解决就干不了事」的信息：蓝牙开关状态（`蓝牙已开启 / 已关闭 / 正在开启... / 正在关闭... / 不可用`，跟着 `ACTION_STATE_CHANGED` 和 `onResume` 刷新），以及权限缺失这类阻塞项。
+顶部一行小字（`statusTextView`，14sp、次要色，跟搜索框之间只留 4dp）只挂「不解决就干不了事」的信息：蓝牙开关状态（`蓝牙已开启 / 已关闭 / 正在开启... / 正在关闭... / 不可用`，跟着 `ACTION_STATE_CHANGED` 和 `onResume` 刷新），以及权限缺失这类阻塞项。
 
 连接、配对、扫描、取消配对这些操作流水不再写顶部，统一落到**底部回执条**：
 

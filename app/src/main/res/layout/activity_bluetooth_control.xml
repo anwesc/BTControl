@@ -15,8 +15,8 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
-        android:layout_marginBottom="12dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="4dp"
         android:gravity="center"
         android:orientation="horizontal"
         android:paddingStart="12dp"
@@ -30,13 +30,13 @@
             android:layout_weight="4"
             android:gravity="center"
             android:text="@string/等待"
-            android:textColor="?android:textColorPrimary"
-            android:textSize="18sp" />
+            android:textColor="@color/textSecondary"
+            android:textSize="14sp" />
 
         <ImageView
             android:id="@+id/image_accessibility_settings"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
             android:layout_marginStart="12dp"
             android:contentDescription="@string/无障碍"
             android:src="@mipmap/accessibility" />
