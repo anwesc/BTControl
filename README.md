@@ -493,7 +493,7 @@ adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
 
 | 字段 | 说明 |
 |---|---|
-| `phase` | `checked` / `install_dispatched` / `install_result` |
+| `phase` | `checked` / `install_dispatched` / `install_pending_user_action` / `install_result` |
 | `update_available` | 有没有比当前 `versionCode` 更大的版本 |
 | `current_versionCode` / `current_versionName` | 当前版本 |
 | `latest_versionCode` / `latest_versionName` / `latest_size` / `latest_apk` | 清单里的新版本 |
@@ -501,6 +501,12 @@ adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
 
 失败原因都是可读串：`check_failed: …`、`download_failed: …`、`sha256_mismatch: …`、`size_mismatch`、
 `needs_install_permission`、`install_failed: …`、`shizuku_install_failed: …`、`requires_newer_sdk`。
+
+不走 Shizuku 时系统安装器会先回一个 `STATUS_PENDING_USER_ACTION`（数值 `-1`）：这不是失败，而是「确认框交给你自己拉起」。
+`InstallResultReceiver` 会从 `Intent.EXTRA_INTENT` 取出确认 Intent 并 `startActivity`，同时回一条
+`ok=true, reason=installer_pending_user_action, phase=install_pending_user_action`；用户点「更新」后再回
+`phase=install_result`、`status_message=INSTALL_SUCCEEDED: …`。所以自动化脚本看到 `installer_pending_user_action`
+要接着等下一次 `install_result`，别当成安装失败。
 
 ### 本地调试完整更新链路
 
