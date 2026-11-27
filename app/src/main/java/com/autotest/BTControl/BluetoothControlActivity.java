@@ -503,9 +503,10 @@ public class BluetoothControlActivity extends AppCompatActivity {
     private void setupRecyclerViews() {
         
         // 已连接设备列表
-        // 已保存设备：整行点击不再进详情页（避免误触），只有右侧箭头进；长按仍是设备操作面板
+        // 已保存设备：行内没有别的点击行为，整行都进详情页（只有箭头能点的话，点名字会像没反应）；
+        // 长按仍是设备操作面板（取消配对）
         SavedDeviceListAdapter = createBluetoothDeviceAdapter(SavedDeviceList,
-            null,
+            (position, deviceItem) -> DeviceDetailActivity.start(this, deviceItem.getDeviceAddress()),
             (position, deviceItem) -> confirmUnpairDevice(deviceItem));
         SavedDeviceListAdapter.setOnDetailClickListener(
             (position, deviceItem) -> DeviceDetailActivity.start(this, deviceItem.getDeviceAddress()));
@@ -2900,7 +2901,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
         if (isConnected) {
             // 行里只留一个状态点，连接配置（A2DP/HFP/LE Audio）在详情页看
-            statusText = "● 已连接";
+            statusText = "已连接";
             profilesText = null;
         } else {
             // 未连接设备不显示状态字符串

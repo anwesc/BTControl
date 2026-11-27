@@ -43,7 +43,7 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
         this.longClickListener = longClickListener;
     }
     
-    /** 给「已保存设备」装上右侧箭头：点箭头进详情页，整行点击不再进。 */
+    /** 给「已保存设备」装上右侧箭头：箭头和整行都进详情页，长按仍是操作面板。 */
     public void setOnDetailClickListener(DeviceClickListener listener) {
         this.detailClickListener = listener;
     }
@@ -61,15 +61,12 @@ public class BluetoothDeviceAdapter extends RecyclerView.Adapter<BluetoothDevice
             BluetoothDeviceItem deviceItem = deviceList.get(position);
             String deviceName = deviceItem.getDeviceName();
             
-            // 当设备名为空时，隐藏设备名称的TextView并设置其高度为0
+            // 名字为空就直接 GONE：约束布局会自己塌掉这一行，别再换 LayoutParams
+            // （换成 LinearLayout.LayoutParams 会把 ConstraintLayout 的约束全丢掉，状态药丸会被挤到箭头下面）
             if (deviceName == null || deviceName.isEmpty()) {
                 holder.deviceNameTextView.setVisibility(View.GONE);
-                holder.deviceNameTextView.setLayoutParams(new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0));
             } else {
                 holder.deviceNameTextView.setVisibility(View.VISIBLE);
-                holder.deviceNameTextView.setLayoutParams(new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
                 holder.deviceNameTextView.setText(deviceName);
             }
             

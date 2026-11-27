@@ -1,75 +1,85 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 设备行：名字（长了截断）+ 连接状态药丸 + 地址；右侧箭头只给已保存设备 -->
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:padding="12dp"
-    android:background="@drawable/device_item_complete_selector"
     android:layout_margin="4dp"
-    android:gravity="center_vertical">
+    android:background="@drawable/device_item_complete_selector"
+    android:padding="12dp">
 
-    <LinearLayout
+    <TextView
+        android:id="@+id/deviceNameTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        app:layout_constrainedWidth="true"
+        app:layout_constraintEnd_toStartOf="@id/deviceStatusTextView"
+        app:layout_constraintHorizontal_bias="0"
+        app:layout_constraintHorizontal_chainStyle="packed"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- 状态药丸紧贴名字，不是贴在箭头旁边：状态属于设备，不属于入口 -->
+    <TextView
+        android:id="@+id/deviceStatusTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/status_pill"
+        android:paddingStart="7dp"
+        android:paddingTop="2dp"
+        android:paddingEnd="7dp"
+        android:paddingBottom="2dp"
+        android:textColor="@color/state_connected"
+        android:textSize="11sp"
+        app:layout_constraintBottom_toBottomOf="@id/deviceNameTextView"
+        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
+        app:layout_constraintStart_toEndOf="@id/deviceNameTextView"
+        app:layout_constraintTop_toTopOf="@id/deviceNameTextView" />
+
+    <TextView
+        android:id="@+id/deviceAddressTextView"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:layout_marginTop="2dp"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="14sp"
+        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/deviceNameTextView" />
 
-        <TextView
-            android:id="@+id/deviceNameTextView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="16sp"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/deviceAddressTextView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="14sp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:layout_marginTop="2dp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="2dp">
-
-            <TextView
-                android:id="@+id/deviceStatusTextView"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:textColor="@android:color/holo_blue_dark"
-                android:layout_marginEnd="4dp" />
-
-            <TextView
-                android:id="@+id/deviceProfilesTextView"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textSize="11sp"
-                android:textColor="@android:color/holo_orange_dark"
-                android:visibility="gone" />
-
-        </LinearLayout>
-
-    </LinearLayout>
+    <TextView
+        android:id="@+id/deviceProfilesTextView"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textColor="@android:color/holo_orange_dark"
+        android:textSize="11sp"
+        android:visibility="gone"
+        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/deviceAddressTextView" />
 
     <!-- 信号强度：只在扫描到的周围设备行显示（已保存设备不登记 RSSI，自动隐藏） -->
     <TextView
         android:id="@+id/deviceRssiTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="6dp"
-        android:textSize="11sp"
+        android:layout_marginStart="8dp"
         android:textColor="?android:attr/textColorSecondary"
+        android:textSize="11sp"
         android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/deviceAddressTextView"
+        app:layout_constraintEnd_toStartOf="@id/deviceDetailImageView"
         tools:ignore="HardcodedText" />
 
-    <!-- 右侧入口：只有「已保存设备」会把它显示出来，点它才进详情页，整行点击不再进去 -->
+    <!-- 右侧箭头：只有「已保存设备」会显示，整行点击也进详情页，它只是个可见的入口提示 -->
     <ImageView
         android:id="@+id/deviceDetailImageView"
         android:layout_width="40dp"
@@ -79,6 +89,9 @@
         android:contentDescription="@string/设备_进入详情"
         android:padding="8dp"
         android:src="@drawable/ic_chevron_right"
-        android:visibility="gone" />
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-</LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -223,7 +223,7 @@ adb shell cmd companiondevice disassociate 0 com.autotest.BTControl 20:05:11:01:
 
 ### 设备详情页（3.1.0+）
 
-列表行现在只留「名字 / 地址 / ● 已连接」三行字。**整行点击不再进详情页**（避免误触），已保存设备行右侧多一个 `›` 箭头（`deviceDetailImageView`，周围设备/非常用设备不显示），点箭头才进 `DeviceDetailActivity`；长按仍是设备操作面板。
+列表行只留两行字：名字（后面紧跟连接状态），以及地址——已连接的设备在名字后面挂一枚绿色 `已连接` 小药丸（`status_pill` 底 + `state_connected` 字，夜间底色 `#1B3A1E`、文字提亮成 `#81C784`），名字太长时名字自己省略号截断、药丸始终贴着名字；没连接就不显示，别占位。已保存设备行右侧保留 `›` 箭头（`deviceDetailImageView`，周围设备/非常用设备不显示），**整行点击都进 `DeviceDetailActivity`**（行内没有别的点击行为，只让 40dp 箭头能点会让人以为点不动），长按仍是设备操作面板（取消配对）。
 详情页版式按卡片分组，从上到下是：概览卡（名字 / MAC / 「取消配对」描边按钮 + 「连接·断开」主按钮，取消配队在左 / 最后刷新时间）→ 连接配置卡（A2DP / HFP / LE Audio 三行，名字 + 状态 + 开关；末尾一行 CDM 关联）→ 底部工具（复制快照 JSON）与结果行。
 
 - 顶部是 MaterialToolbar（返回箭头 + 「设备详情」，`colorPrimary` 蓝底白字），返回键直接 `finish()`，不用再靠系统返回手势。
