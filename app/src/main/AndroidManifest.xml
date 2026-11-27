@@ -6,6 +6,9 @@
 <!--    tools:targetApi="tiramisu">-->
 
     <!-- Permissions -->
+    <!-- 自动更新要联网拉 version.json / 下载 APK -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.BLUETOOTH"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
 
@@ -34,6 +37,8 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <!-- 自动更新：把下载好的 APK 交给系统安装器（PackageInstaller）自更新 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Declare usage of BLE (Bluetooth Low Energy) -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
@@ -74,6 +79,15 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- PackageInstaller 的安装结果：安装失败时回一条可诊断原因（成功时旧进程已被替换） -->
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.autotest.BTControl.INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
 
         <!-- Main launcher activity declaration -->
         <!-- singleTop：adb 反复 am start 传参时要复用同一个实例，否则多个 Activity 抢扫描 -->

@@ -25,7 +25,7 @@
 
         <!-- 应用启动背景 -->
         <item name="android:windowBackground">@color/background</item> <!-- 深色背景 #121212 -->
-        <item name="cardBackgroundColor">@color/surface_night</item> <!-- 卡片比页面亮一级，层级看得出来 -->
+        <item name="cardBackgroundColor">@color/surface_card</item> <!-- 卡片比页面亮一级，层级看得出来 -->
 
         <!-- 对话框按钮用强调蓝，避免主色在夜间过暗 -->
         <item name="materialAlertDialogTheme">@style/ThemeOverlay.BTControl.AlertDialog</item>

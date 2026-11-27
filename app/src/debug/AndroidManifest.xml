@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 仅 debug 包允许明文 HTTP：调试自动更新时可以把 update_source 指到
+         PC 上的 http://127.0.0.1:端口/version.json（配合 adb reverse）。
+         release 包保持默认（禁止明文），更新源必须是 https。 -->
+    <application android:usesCleartextTraffic="true" />
+</manifest>

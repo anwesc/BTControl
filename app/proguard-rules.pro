@@ -19,3 +19,8 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# Shizuku 服务/代理类是用字符串反射拿的（Class.forName("moe.shizuku.server.IShizukuService$Stub")），
+# 名字不参与编译期引用，R8 会整个删掉，导致 release 包静默安装/关联/连 HFP 全部失效。
+-keep class moe.shizuku.** { *; }
+-keep interface moe.shizuku.** { *; }
+-dontwarn moe.shizuku.**

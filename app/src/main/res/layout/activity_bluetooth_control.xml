@@ -117,4 +117,18 @@
             android:textColor="?android:textColorSecondary"
             android:textSize="12sp" />
     </LinearLayout>
+
+    <!-- 版本入口：点一下看当前版本 / 检查更新 / 更新设置；给自动化留一个可见锚点 -->
+    <TextView
+        android:id="@+id/versionTextView"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/selectableItemBackground"
+        android:contentDescription="@string/版本_入口"
+        android:gravity="center"
+        android:paddingTop="4dp"
+        android:paddingBottom="6dp"
+        android:text="v3.2.0"
+        android:textColor="?android:textColorSecondary"
+        android:textSize="11sp" />
 </LinearLayout>

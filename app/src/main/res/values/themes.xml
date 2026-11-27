@@ -24,7 +24,7 @@
 
         <!-- 应用启动背景 -->
         <item name="android:windowBackground">@color/white</item>
-        <item name="cardBackgroundColor">@color/white</item> <!-- 白天是白色 -->
+        <item name="cardBackgroundColor">@color/surface_card</item> <!-- 白天是白色 -->
 
         <!-- 对话框按钮用强调蓝，避免主色在夜间过暗 -->
         <item name="materialAlertDialogTheme">@style/ThemeOverlay.BTControl.AlertDialog</item>

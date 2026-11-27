@@ -32,6 +32,7 @@
     <color name="colorUnchecked">#BDBDBD</color> <!-- 示例灰色 -->
     <color name="selected_bg_color">#80DEEA</color> <!-- 示例浅蓝色 -->
     <color name="card_stroke_color">#CCCCCC</color> <!-- 浅灰 -->
+    <color name="surface_card">#FFFFFF</color> <!-- 卡片底：白天纯白，夜间见 values-night -->
 
     <!-- 设备详情页的语义色：绿=已连接/正常，橙=过渡中/待处理，灰=断开/不支持 -->
     <color name="state_connected">#2E7D32</color>

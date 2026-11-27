@@ -16,13 +16,14 @@ adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
 
 | extra | 说明 |
 |---|---|
-| `auto_action` | `state` / `扫描` / `配对` / `重新配对` / `连接` / `断链` / `取消配对` |
+| `auto_action` | `state` / `扫描` / `配对` / `重新配对` / `连接` / `断链` / `取消配对` / `检查更新` / `更新` |
 | `bluetooth_address` | 目标设备地址（也接受 `device_address`）；`state` 与不带地址的 `扫描` 可不传 |
 | `auto_name` | 目标设备名（如 `DM_Speaker`）。没地址时按名字在**已配对**列表里找，先精确匹配再包含匹配；找不到就报 `missing_device_address`，不瞎猜（3.1.0+ 点名了却解析不出来直接失败，不再静默当全局查询） |
 | `scan_sec` | 列表扫描跑几秒（默认 12，最小 3）。只在 `扫描` 不带地址时生效 |
 | `auto_profile` | 只动某一个 profile：`a2dp` / `hfp` / `leaudio` / `all`（默认 `all`）。只对 `连接` / `断链` 有意义，见下面「单 profile 连接/断链」 |
 | `req` | 调用方自带的请求号，原样回显在结果里，用于对齐「哪一次请求」 |
 | `finish` | 结束后自动关界面（`finish_after` 同义） |
+| `update_source` | 只对 `检查更新` / `更新` 有效：临时指定 `version.json` 地址（不写进设置） |
 
 `auto_action=state` 是只读查询：不改状态、不等动作，立刻返回当前 bond / profile 状态。
 
@@ -421,3 +422,100 @@ Shizuku 没起/没授权时，`--via shizuku` 会明确回 `shizuku_not_running`
   不做 LE Audio，所以连/断都回 false。要验证 LE Audio 得换一台支持 LE Audio 的对端。
 - 代理报成功但 3s 内状态没变成 CONNECTED 时，会改报
   `profile_not_connected: <profile> 等 CONNECTED 超时`，不让 `ok=true` 掩盖「什么都没发生」。
+
+## 发布流水线与自动更新（3.2.0+）
+
+### 版本号怎么来
+
+- 默认值在 `gradle.properties`：`btcontrol.versionName=3.2.0`、`btcontrol.versionCode=3002000`
+- CI 打 tag 时用 `-Pbtcontrol.versionName=… -Pbtcontrol.versionCode=…` 覆盖
+- `versionCode` 规则固定：`major*1000000 + minor*1000 + patch`（3.2.0 → 3002000，3.10.1 → 3010001），
+  保证 Android 的「新版本覆盖旧版本」判断与语义版本一致
+
+### 打一版（GitHub Actions）
+
+```bash
+git tag v3.2.0 && git push origin v3.2.0
+```
+
+`release` workflow 会：构建 `assembleRelease` → 生成 `version.json` → 建 GitHub Release，
+上传两个资产：`BTControl_v3.2.0.apk`、`version.json`。也可以在 Actions 页面手动触发并填版本号。
+
+`ci` workflow 在 push / PR 时只跑 `assembleDebug`，防止「打 tag 了才发现编不过」。
+
+`version.json` 长这样（字段和 App 解析代码 `UpdateManifest` 一一对应）：
+
+```json
+{
+  "versionCode": 3002000,
+  "versionName": "3.2.0",
+  "apkUrl": "https://github.com/anwesc/BTControl/releases/download/v3.2.0/BTControl_v3.2.0.apk",
+  "sha256": "…64 位小写 hex…",
+  "size": 2300465,
+  "minSdk": 27,
+  "changelog": "- 提交标题一行一条",
+  "publishedAt": "2026-11-27T02:00:00Z"
+}
+```
+
+`apkUrl` 允许相对路径（相对 `version.json` 自己的地址解析），方便换成公司内网地址。
+
+### App 内怎么更新
+
+- 默认更新源：`https://github.com/anwesc/BTControl/releases/latest/download/version.json`
+- 入口：界面底部那行版本号。**点一下**＝检查更新，**长按**＝更新设置（自动检查开关、静默安装开关、更新源地址）
+- 手动打开 App 时自动检查（默认开，24 小时内只查一次；带 `auto_action` 启动不查，不干扰自动化）
+- 流程：拉清单 → 比 `versionCode` → 弹更新说明（不静默替换）→ 下载到 `cacheDir/updates/` → 校验
+  `sha256` + `size` → 安装
+- 安装两条路：
+  1. **Shizuku 静默**（默认开、Shizuku 已授权时）：`pm install -r -d -S <size>`，APK 从 stdin 流进 `pm`。
+     应用私有目录 shell 读不到，所以必须走 stdin，不能传路径。装完进程被替换，等不到回执。
+  2. **PackageInstaller**（Shizuku 不可用或关掉静默时）：需要「安装未知应用」权限，系统弹确认框，
+     结果通过 `com.autotest.BTControl.INSTALL_RESULT` 广播回到 `InstallResultReceiver`，失败原因写进结果 JSON。
+
+### 用 adb 驱动更新（给自动化）
+
+```bash
+# 只查有没有新版，不下载
+adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
+  -e auto_action "检查更新" -e req "upd1"
+
+# 查 + 下载 + 安装（Shizuku 授权时静默装，装完 App 会被替换）
+adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
+  -e auto_action "更新" -e req "upd2"
+
+# 指向自定义清单（调试用，需要 debug 包；release 包只允许 https）
+adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
+  -e auto_action "更新" -e update_source "http://127.0.0.1:8123/version.json"
+```
+
+结果走同一条 `BTCTL RESULT` 通道（`logcat -s BTCTL` 或 `files/btctl_result.json`），额外字段：
+
+| 字段 | 说明 |
+|---|---|
+| `phase` | `checked` / `install_dispatched` / `install_result` |
+| `update_available` | 有没有比当前 `versionCode` 更大的版本 |
+| `current_versionCode` / `current_versionName` | 当前版本 |
+| `latest_versionCode` / `latest_versionName` / `latest_size` / `latest_apk` | 清单里的新版本 |
+| `manifest_url` | 这次用的清单地址 |
+
+失败原因都是可读串：`check_failed: …`、`download_failed: …`、`sha256_mismatch: …`、`size_mismatch`、
+`needs_install_permission`、`install_failed: …`、`shizuku_install_failed: …`、`requires_newer_sdk`。
+
+### 本地调试完整更新链路
+
+```bash
+# 1) 造一个「更新的版本」并起本地清单服务
+./gradlew assembleDebug -Pbtcontrol.versionName=3.3.0 -Pbtcontrol.versionCode=3003000
+mkdir -p /tmp/srv && cp app/build/outputs/apk/debug/BTControl_v3.3.0.apk /tmp/srv/
+# version.json 里 apkUrl 写相对名、sha256/size 与包一致
+cd /tmp/srv && python -m http.server 8123 --bind 127.0.0.1
+
+# 2) 让手机访问到本机端口
+adb reverse tcp:8123 tcp:8123
+adb shell am start -n com.autotest.BTControl/.BluetoothControlActivity \
+  -e auto_action "更新" -e update_source "http://127.0.0.1:8123/version.json"
+```
+
+`app/src/debug/AndroidManifest.xml` 给 debug 包开了 `usesCleartextTraffic`，所以上面能走 http；
+release 包不开明文，更新源必须是 https。

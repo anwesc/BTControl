@@ -168,6 +168,101 @@ public final class ShizukuBridge {
     }
 
     /**
+     * 以 shell 身份静默安装一个 APK：{@code pm install -r -d -S <size>}，安装包从 stdin 灌进去。
+     *
+     * <p>不能直接 {@code pm install <path>}：下载的包在 app 私有目录（{@code /data/user/0/...}），
+     * shell 读不到。adb 装包用的就是 {@code -S} 把字节从主机流进 shell 的 stdin，这里照抄。
+     *
+     * <p>成功时新版本会把本进程替换掉，通常来不及回到调用方；调用方不要指望成功回调。
+     *
+     * @return "ok" 表示安装成功；其余是可直接上报的原因串
+     */
+    public static String installApk(java.io.File apk) {
+        if (apk == null || !apk.isFile() || apk.length() <= 0) {
+            return "update_apk_missing";
+        }
+        String st = status();
+        if (!"ok".equals(st)) {
+            return st;
+        }
+        try {
+            IBinder binder = Shizuku.getBinder();
+            if (binder == null) {
+                return "shizuku_binder_missing";
+            }
+            Object service = Class.forName(SHIZUKU_SERVICE_STUB)
+                    .getMethod("asInterface", IBinder.class)
+                    .invoke(null, binder);
+            if (service == null) {
+                return "shizuku_service_missing";
+            }
+            String[] command = {"pm", "install", "-r", "-d", "-S", String.valueOf(apk.length())};
+            Object process = service.getClass()
+                    .getMethod("newProcess", String[].class, String[].class, String.class)
+                    .invoke(service, command, null, null);
+            if (process == null) {
+                return "shizuku_process_missing";
+            }
+            String writeError = streamApkInto(process, apk);
+            if (writeError != null) {
+                return writeError;
+            }
+            Object code = process.getClass().getMethod("waitFor").invoke(process);
+            int exit = code instanceof Integer ? (Integer) code : -1;
+            String out = readProcessStream(process, "getInputStream");
+            String err = readProcessStream(process, "getErrorStream");
+            Log.i(TAG, "shizuku pm install exit=" + exit + " out=" + out.trim() + " err=" + err.trim());
+            if (exit == 0 && out.contains("Success")) {
+                return "ok";
+            }
+            String detail = (err.trim().isEmpty() ? out : err).trim();
+            return "shizuku_install_failed: " + (detail.isEmpty() ? "exit=" + exit : detail);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            Log.w(TAG, "shizuku pm install 抛异常", cause);
+            return "shizuku_install_failed: " + cause;
+        } catch (Throwable t) {
+            Log.w(TAG, "shizuku pm install 失败", t);
+            return "shizuku_install_failed: " + t;
+        }
+    }
+
+    /** 把 APK 字节写进远端进程的 stdin。成功返回 null。 */
+    private static String streamApkInto(Object process, java.io.File apk) {
+        android.os.ParcelFileDescriptor pfd;
+        try {
+            pfd = (android.os.ParcelFileDescriptor) process.getClass()
+                    .getMethod("getOutputStream").invoke(process);
+        } catch (Throwable t) {
+            return "shizuku_stdin_failed: " + t;
+        }
+        if (pfd == null) {
+            return "shizuku_stdin_missing";
+        }
+        try (java.io.OutputStream os = new java.io.FileOutputStream(pfd.getFileDescriptor());
+             java.io.FileInputStream in = new java.io.FileInputStream(apk)) {
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            long sent = 0;
+            while ((n = in.read(buf)) > 0) {
+                os.write(buf, 0, n);
+                sent += n;
+            }
+            os.flush();
+            Log.i(TAG, "shizuku pm install 写入 " + sent + "/" + apk.length() + " 字节");
+            return sent == apk.length() ? null : "shizuku_stdin_short: " + sent + "/" + apk.length();
+        } catch (Throwable t) {
+            return "shizuku_stdin_failed: " + t;
+        } finally {
+            try {
+                pfd.close();
+            } catch (Throwable ignored) {
+                // 进程已退出
+            }
+        }
+    }
+
+    /**
      * 以 shell 身份调 {@code IBluetoothHeadset.connect}。
      *
      * @param headsetProxy 常规 {@code getProfileProxy} 拿到的 BluetoothHeadset 代理

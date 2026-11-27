@@ -1,0 +1,129 @@
+name: release
+
+# 打 tag（v3.2.0 这种）就发一版：构建 release APK + 生成 version.json + 挂到 GitHub Release。
+# 也可以在 Actions 页面手动触发，填版本号即可（会自动建同名 tag）。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（x.y.z，不带 v）；留空则取触发 ref'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 要算「上一个 tag 到本 tag」的提交清单当更新说明，得拿全历史
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 解析版本号
+        id: ver
+        run: |
+          set -euo pipefail
+          raw="${{ inputs.version }}"
+          if [ -z "$raw" ]; then raw="${GITHUB_REF_NAME}"; fi
+          version="${raw#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "版本号格式非法: '$version'，要 x.y.z（如 3.2.0）" >&2
+            exit 1
+          fi
+          IFS=. read -r major minor patch <<< "$version"
+          # 和 gradle.properties 里的规则一致：major*1000000 + minor*1000 + patch
+          code=$((major * 1000000 + minor * 1000 + patch))
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "版本 $version（versionCode $code），tag v$version"
+
+      - name: 构建 release APK
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --console=plain --stacktrace \
+            -Pbtcontrol.versionName="${{ steps.ver.outputs.version }}" \
+            -Pbtcontrol.versionCode="${{ steps.ver.outputs.code }}"
+
+      - name: 生成 version.json
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          VCODE: ${{ steps.ver.outputs.code }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/release/BTControl_v${VERSION}.apk"
+          if [ ! -f "$apk" ]; then
+            echo "找不到 APK: $apk" >&2
+            ls -l app/build/outputs/apk/release/ >&2 || true
+            exit 1
+          fi
+          apk_url="https://github.com/${REPO}/releases/download/${TAG}/$(basename "$apk")"
+          sha=$(sha256sum "$apk" | cut -d' ' -f1)
+          size=$(stat -c%s "$apk")
+          # 更新说明：上一个 tag 到本次 tag 的提交标题，没有就退化成最近 20 条
+          prev=$(git describe --tags --match 'v*' --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            changelog=$(git log --pretty=format:'- %s' "${prev}..${TAG}")
+          else
+            changelog=$(git log --pretty=format:'- %s' -20)
+          fi
+          export APK_URL="$apk_url" SHA256="$sha" SIZE="$size" CHANGELOG="$changelog" \
+                 PUBLISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 - <<'PY' > version.json
+          import json, os
+          print(json.dumps({
+              "versionCode": int(os.environ["VCODE"]),
+              "versionName": os.environ["VERSION"],
+              "apkUrl": os.environ["APK_URL"],
+              "sha256": os.environ["SHA256"],
+              "size": int(os.environ["SIZE"]),
+              "minSdk": 27,
+              "changelog": os.environ["CHANGELOG"],
+              "publishedAt": os.environ["PUBLISHED_AT"],
+          }, ensure_ascii=False, indent=2))
+          PY
+          cat version.json
+          {
+            echo "# BTControl v${VERSION}"
+            echo
+            echo "$changelog"
+            echo
+            echo "## 安装"
+            echo
+            echo "- 应用内：打开 BTControl → 底部版本号 → 检查更新"
+            echo "- 手动：下载下方 \`BTControl_v${VERSION}.apk\`（minSdk 27 / Android 8.1+）"
+            echo
+            echo "版本清单 \`version.json\` 供应用内自动更新使用。"
+          } > release-notes.md
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: BTControl v${{ steps.ver.outputs.version }}
+          body_path: release-notes.md
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            app/build/outputs/apk/release/BTControl_v${{ steps.ver.outputs.version }}.apk
+            version.json

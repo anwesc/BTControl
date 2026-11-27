@@ -109,4 +109,41 @@
     <string name="详情_无障碍HFP开关">HFP 开关</string>
     <string name="详情_无障碍LE开关">LE Audio 开关</string>
     <string name="详情_无障碍返回">返回</string>
+
+    <!-- 版本与自动更新（3.2.0+） -->
+    <string name="版本_当前">当前版本 v%1$s（%2$d）</string>
+    <string name="版本_摘要">更新源：%1$s\n自动检查：%2$s</string>
+    <string name="版本_自动开">开（每 24 小时一次）</string>
+    <string name="版本_自动关">关</string>
+    <string name="版本_检查更新">检查更新</string>
+    <string name="版本_设置">设置</string>
+    <string name="版本_关闭">关闭</string>
+    <string name="版本_已是最新">已是最新版本 v%1$s</string>
+    <string name="版本_发现新版本">发现新版本 v%1$s</string>
+    <string name="版本_更新说明">\n\n%1$s\n\n当前 v%2$s（%3$d）→ 新版本 v%4$s（%5$d）</string>
+    <string name="版本_无更新说明">（该版本没有填写更新说明）</string>
+    <string name="版本_立即更新">立即更新</string>
+    <string name="版本_稍后">稍后</string>
+    <string name="版本_检查中">正在检查更新…</string>
+    <string name="版本_检查失败">检查失败：%1$s</string>
+    <string name="版本_下载中">正在下载 %1$d%%（%2$s / %3$s）</string>
+    <string name="版本_下载失败">下载失败：%1$s</string>
+    <string name="版本_校验失败">更新包 SHA-256 与清单不一致，已丢弃</string>
+    <string name="版本_下载完成">下载完成，准备安装…</string>
+    <string name="版本_安装中">正在安装，应用会被新版本替换…</string>
+    <string name="版本_静默安装">Shizuku 静默安装（不弹系统安装框）</string>
+    <string name="版本_静默安装说明">Shizuku 未运行或未授权时自动退回系统安装器，需要用户点一下「更新」。</string>
+    <string name="版本_自动检查">启动时自动检查更新（24 小时一次）</string>
+    <string name="版本_自动检查说明">只检查不自动装：发现新版本会弹一次确认，避免测试中途界面被换掉。</string>
+    <string name="版本_更新源">更新源（version.json 地址）</string>
+    <string name="版本_更新源说明">默认 GitHub Releases；内网或镜像可填自己的 version.json 完整地址。留空恢复默认。</string>
+    <string name="版本_保存">保存</string>
+    <string name="版本_取消">取消</string>
+    <string name="版本_恢复默认">恢复默认</string>
+    <string name="版本_未知">未知</string>
+    <string name="版本_安装权限缺失">先允许「BTControl」安装未知应用，再回来点一次「立即更新」</string>
+    <string name="版本_去授权">去授权</string>
+    <string name="版本_没有下载器">没有浏览器/下载器可以打开更新地址</string>
+    <string name="版本_安装失败">安装失败：%1$s</string>
+    <string name="版本_入口">版本与更新</string>
 </resources>
