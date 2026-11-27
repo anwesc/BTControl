@@ -128,11 +128,15 @@ adb shell cat /sdcard/Android/data/com.autotest.BTControl/files/btctl_result.jso
 
 顶部一行小字（`statusTextView`，14sp、次要色，跟搜索框之间只留 4dp）只挂「不解决就干不了事」的信息：蓝牙开关状态（`蓝牙已开启 / 已关闭 / 正在开启... / 正在关闭... / 不可用`，跟着 `ACTION_STATE_CHANGED` 和 `onResume` 刷新），以及权限缺失这类阻塞项。
 
+蓝牙关着的时候，顶部那行字会变成 `蓝牙已关闭 · 点按开启`，点一下就走系统确认框把蓝牙开回来（Android 13 起普通应用直接调 `BluetoothAdapter.enable()` 会被系统服务拒掉，日志里是 `BluetoothServiceBinder: enable(): FAILED: Caller does not match restriction criteria`，所以新系统一律走 `ACTION_REQUEST_ENABLE`）。
+
 连接、配对、扫描、取消配对这些操作流水不再写顶部，统一落到**底部回执条**：
 
 - 普通事件显示 6 秒（`EVENT_BAR_TTL_MS`）后自动回落到上一条自动化结果，没有结果就收起；
 - 同一句话不会「顶部一条 + Toast 一条 + 底部一条」：页面在前台时不再弹 Toast，只有退到后台才用 Toast 兜底；
 - 文案里带「失败 / 错误 / 异常」的自动标红，跟自动化失败一个颜色。
+
+更新页（点版本号弹出）只在新版本真有公告时才显示「更新公告」那一块；`update_available=false` 时标题、正文、`当前 → 新版本` 行整块隐藏，只留「已是最新版本」和当前版本号。
 
 ### 界面列表（3.1.0+）
 

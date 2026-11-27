@@ -411,6 +411,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
      */
     private void setupUI() {
         statusTextView = findViewById(R.id.statusTextView);
+        setupStatusTapToEnable();
         setupBtctlBar();
 
         // 初始化无障碍设置按钮
@@ -982,6 +983,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
         View content = getLayoutInflater().inflate(R.layout.dialog_update_info, null);
         updatePageStatusView = content.findViewById(R.id.updatePageStatus);
         updatePageCurrentView = content.findViewById(R.id.updatePageCurrent);
+        updatePageNoticeBlockView = content.findViewById(R.id.updatePageNoticeBlock);
         updatePageChangelogView = content.findViewById(R.id.updatePageChangelog);
         updatePageTransitionView = content.findViewById(R.id.updatePageTransition);
         renderUpdatePage(null);
@@ -1027,6 +1029,10 @@ public class BluetoothControlActivity extends AppCompatActivity {
             UpdateManager.setPending(this, result.manifest);
             m = result.manifest;
             refreshVersionDot();
+        }
+        if (updatePageNoticeBlockView != null) {
+            // 没新版本时公告整块不显示，别留一屏空白让人以为加载失败
+            updatePageNoticeBlockView.setVisibility(m != null ? View.VISIBLE : View.GONE);
         }
         if (m != null) {
             updatePageStatusView.setText(getString(R.string.版本_页_有新版本, m.versionName, m.versionCode));
@@ -1206,6 +1212,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
     private TextView updatePageStatusView;
     private TextView updatePageCurrentView;
+    private View updatePageNoticeBlockView;
     private TextView updatePageChangelogView;
     private TextView updatePageTransitionView;
 
@@ -2911,9 +2918,57 @@ public class BluetoothControlActivity extends AppCompatActivity {
      */
     private void setKeyStatus(String status) {
         if (statusTextView != null) {
-            statusTextView.setText(status);
+            // 关着的时候给个可以点的提示，省得人去系统设置里翻
+            statusTextView.setText("蓝牙已关闭".equals(status) ? status + " · 点按开启" : status);
         }
         Log.d(TAG, status);
+    }
+
+    /** 蓝牙关着的时候点一下顶部小字就直接开，回到前台就能扫。 */
+    private void setupStatusTapToEnable() {
+        if (statusTextView == null) {
+            return;
+        }
+        statusTextView.setOnClickListener(v -> {
+            if (bluetoothAdapter == null && bluetoothManager != null) {
+                bluetoothAdapter = bluetoothManager.getAdapter();
+            }
+            if (bluetoothAdapter == null) {
+                showEvent("这台机器没有蓝牙适配器", true);
+                return;
+            }
+            if (bluetoothAdapter.isEnabled()) {
+                showEvent("蓝牙已经开着", false);
+                return;
+            }
+            if (!hasBluetoothPermissions()) {
+                showEvent("没有蓝牙权限，开不了", true);
+                return;
+            }
+            // Android 13 起普通应用调 enable() 只会被系统服务拒掉（日志里能看到
+            // BluetoothServiceBinder: enable(): FAILED: Caller does not match restriction criteria），
+            // 所以新系统一律走系统确认框，老系统还是直接开更顺。
+            boolean enabled = false;
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                try {
+                    enabled = bluetoothAdapter.enable();
+                } catch (SecurityException e) {
+                    enabled = false;
+                }
+            }
+            if (enabled) {
+                showEvent("正在开启蓝牙", false);
+                refreshKeyStatus();
+                return;
+            }
+            // 被设备策略挡掉时退回系统确认框，至少让人知道该点哪儿
+            try {
+                startActivity(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (Exception e) {
+                showEvent("开启蓝牙失败，请到系统设置里打开", true);
+            }
+        });
     }
 
     /** 把蓝牙适配器的当前状态写到顶部，别让用户对着「......」猜。 */
