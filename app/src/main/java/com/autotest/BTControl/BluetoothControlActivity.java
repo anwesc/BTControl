@@ -257,12 +257,15 @@ public class BluetoothControlActivity extends AppCompatActivity {
         // 回到前台时刷新状态条：蓝牙/无障碍/profile 可能在别处被改过
         refreshBtctlBar();
         refreshVersionDot();
+        refreshKeyStatus();
         scheduleSavedDeviceRefresh();
+        resumed = true;
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        resumed = false;
 
         // 这里刻意不停扫描、也不注销接收器：AI 用 adb 触发扫描时界面经常被切到后台，
         // 在 onPause 收摊就等于「扫到一半变聋」。收摊统一放到 onDestroy 的 cleanup()。
@@ -288,7 +291,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
                 startDeviceMonitoring();
                 startBluetoothDiscovery();
             } else {
-                updateStatus("蓝牙权限未授予，部分功能可能无法使用");
+                setKeyStatus("蓝牙权限未授予，部分功能可能无法使用");
             }
         }
     }
@@ -366,7 +369,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
                         if (Settings.canDrawOverlays(this)) {
                             updateStatus("悬浮窗权限已授予");
                         } else {
-                            updateStatus("悬浮窗权限未授予，部分功能可能无法使用");
+                            showEvent("悬浮窗权限未授予，部分功能可能无法使用", false);
                         }
                     }
                 }
@@ -747,6 +750,10 @@ public class BluetoothControlActivity extends AppCompatActivity {
             public void onReceive(Context context, Intent intent) {
                 String action = intent == null ? null : intent.getAction();
                 Log.d(TAG, "设备状态变化: " + action);
+                // 顶部只挂蓝牙开关状态，开关一变就跟着刷，别等后台广播绕一圈
+                if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(action)) {
+                    refreshKeyStatus();
+                }
                 scheduleSavedDeviceRefresh();
             }
         };
@@ -1562,11 +1569,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
             @Override
             public void onOperationComplete(String action, boolean success, String message) {
                 runOnUiThread(() -> {
-                    if (success) {
-                        updateStatus("自动化操作完成: " + action);
-                    } else {
-                        updateStatus("自动化操作失败: " + action + " - " + message);
-                    }
+                    // 结果统一由底部回执条（emitBtctlResult -> refreshBtctlBar）展示，顶部不再重复
                     autoAction.set(false);
                     emitBtctlResult(success, message);
                 });
@@ -1574,7 +1577,8 @@ public class BluetoothControlActivity extends AppCompatActivity {
 
             @Override
             public void onDeviceDiscovered(BluetoothDevice device) {
-                runOnUiThread(() -> updateStatus("自动化发现设备: " + device.getName()));
+                // 列表自己会刷新，自动化期间每发现一台就写一条状态只会刷屏
+                Log.d(TAG, "自动化发现设备: " + device.getName());
             }
         });
 
@@ -1967,11 +1971,49 @@ public class BluetoothControlActivity extends AppCompatActivity {
         }
     }
 
+    /** 非自动化事件在底部停留多久（毫秒），到点回落到上一条自动化结果。 */
+    private static final long EVENT_BAR_TTL_MS = 6000L;
+
+    /** 页面是否在前台：前台时事件全走底部回执条，不再叠一层 Toast。 */
+    private boolean resumed = false;
+
+    /** 事件序号：事件条翻篇（来新事件/刷回执）后，旧的延时恢复直接作废。 */
+    private int eventBarToken = 0;
+
+    /** 当前挂在事件条上的事件文本，用来合并「扫描重启」这类重复事件。 */
+    private String eventBarText;
+
+    /** 在底部回执条上闪一条普通事件/错误，不占用顶部状态条。 */
+    private void showEvent(String text, boolean error) {
+        if (btctlBar == null || btctlResultTextView == null || text == null || text.isEmpty()) {
+            return;
+        }
+        final int token = ++eventBarToken;
+        boolean same = text.equals(eventBarText);
+        eventBarText = text;
+        btctlBar.setVisibility(View.VISIBLE);
+        if (!same) {
+            btctlResultTextView.setText(text);
+            btctlResultTextView.setTextColor(getColor(error
+                    ? android.R.color.holo_red_dark : R.color.grey_700));
+        }
+        mainHandler.postDelayed(() -> {
+            if (token != eventBarToken) {
+                return;
+            }
+            eventBarText = null;
+            refreshBtctlBar();
+        }, EVENT_BAR_TTL_MS);
+    }
+
     /** 刷新底部回执条：没触发过自动化就一直藏着，别占用户首屏。 */
     private void refreshBtctlBar() {
         if (btctlResultTextView == null || btctlBar == null) {
             return;
         }
+        // 事件条回到自动化回执：作废还没到点的事件恢复
+        eventBarText = null;
+        eventBarToken++;
         JSONObject last = BtctlReporter.lastJson;
         if (last == null) {
             btctlBar.setVisibility(View.GONE);
@@ -2387,7 +2429,7 @@ public class BluetoothControlActivity extends AppCompatActivity {
             @Override
             public void onDiscoveryError(String error) {
                 runOnUiThread(() -> {
-                    updateStatus("设备扫描错误: " + error);
+                    showEvent("设备扫描错误: " + error, true);
                     setScanButtonText("开始扫描");
                     setScanProgress(false);
                     isScanning.set(false);
@@ -2399,19 +2441,19 @@ public class BluetoothControlActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     switch (state) {
                         case BluetoothAdapter.STATE_ON:
-                            updateStatus("蓝牙已开启");
+                            setKeyStatus("蓝牙已开启");
                             if (hasBluetoothPermissions()) {
                                 startBluetoothDiscovery();
                             }
                             break;
                         case BluetoothAdapter.STATE_OFF:
-                            updateStatus("蓝牙已关闭");
+                            setKeyStatus("蓝牙已关闭");
                             break;
                         case BluetoothAdapter.STATE_TURNING_ON:
-                            updateStatus("蓝牙正在开启...");
+                            setKeyStatus("蓝牙正在开启...");
                             break;
                         case BluetoothAdapter.STATE_TURNING_OFF:
-                            updateStatus("蓝牙正在关闭...");
+                            setKeyStatus("蓝牙正在关闭...");
                             break;
                     }
                 });
@@ -2864,21 +2906,62 @@ public class BluetoothControlActivity extends AppCompatActivity {
     }
 
     /**
-     * 更新状态文本
+     * 顶部状态条只留关键信息：蓝牙开关状态，以及不解决就什么都干不了的阻塞项（没权限之类）。
+     * 连接/配对/扫描这些操作流水走底部回执条，同一句话不在页面上下各出现一次。
      */
-    private void updateStatus(String status) {
+    private void setKeyStatus(String status) {
         if (statusTextView != null) {
             statusTextView.setText(status);
         }
         Log.d(TAG, status);
+    }
+
+    /** 把蓝牙适配器的当前状态写到顶部，别让用户对着「......」猜。 */
+    private void refreshKeyStatus() {
+        if (bluetoothAdapter == null && bluetoothManager != null) {
+            bluetoothAdapter = bluetoothManager.getAdapter();
+        }
+        if (bluetoothAdapter == null) {
+            setKeyStatus("蓝牙不可用");
+            return;
+        }
+        switch (bluetoothAdapter.getState()) {
+            case BluetoothAdapter.STATE_ON:
+                setKeyStatus("蓝牙已开启");
+                break;
+            case BluetoothAdapter.STATE_OFF:
+                setKeyStatus("蓝牙已关闭");
+                break;
+            case BluetoothAdapter.STATE_TURNING_ON:
+                setKeyStatus("蓝牙正在开启...");
+                break;
+            case BluetoothAdapter.STATE_TURNING_OFF:
+                setKeyStatus("蓝牙正在关闭...");
+                break;
+            default:
+                setKeyStatus("蓝牙状态未知");
+                break;
+        }
+    }
+
+    /**
+     * 操作流水统一落到页面底部的回执条上：几秒后自动回落到上一条自动化结果，没有结果就收起。
+     */
+    private void updateStatus(String status) {
+        Log.d(TAG, status);
+        // 文案里带「失败/错误」的按错误标红，别让失败提示跟普通进度长一个样
+        boolean error = status.contains("失败") || status.contains("错误") || status.contains("异常");
+        showEvent(status, error);
     }
     
     /**
      * 显示错误消息（使用Toast和状态文本）
      */
     private void showErrorMessage(String message) {
-        updateStatus(message);
-        ToastUtils.showError(this, message);
+        showEvent(message, true);
+        if (!resumed) {
+            ToastUtils.showError(this, message);
+        }
         Log.e(TAG, "错误: " + message);
     }
     
@@ -2887,7 +2970,9 @@ public class BluetoothControlActivity extends AppCompatActivity {
      */
     private void showSuccessMessage(String message) {
         updateStatus(message);
-        ToastUtils.showSuccess(this, message);
+        if (!resumed) {
+            ToastUtils.showSuccess(this, message);
+        }
         Log.i(TAG, "成功: " + message);
     }
     
@@ -2896,7 +2981,9 @@ public class BluetoothControlActivity extends AppCompatActivity {
      */
     private void showWarningMessage(String message) {
         updateStatus(message);
-        ToastUtils.showWarning(this, message);
+        if (!resumed) {
+            ToastUtils.showWarning(this, message);
+        }
         Log.w(TAG, "警告: " + message);
     }
     

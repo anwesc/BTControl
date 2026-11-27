@@ -124,6 +124,16 @@ adb shell cat /sdcard/Android/data/com.autotest.BTControl/files/btctl_result.jso
 - 长按 → 弹「运行环境」：蓝牙开关 / 无障碍是否开启 / A2DP、HFP 状态（`BtctlReporter.envLine`）。
 - 这块最初是常驻顶部两行，占首屏且对普通使用无意义，后来挪到底部并按需出现。
 
+### 顶部状态条 / 底部回执条分工（3.3.1+）
+
+顶部一行字（`statusTextView`）只挂「不解决就干不了事」的信息：蓝牙开关状态（`蓝牙已开启 / 已关闭 / 正在开启... / 正在关闭... / 不可用`，跟着 `ACTION_STATE_CHANGED` 和 `onResume` 刷新），以及权限缺失这类阻塞项。
+
+连接、配对、扫描、取消配对这些操作流水不再写顶部，统一落到**底部回执条**：
+
+- 普通事件显示 6 秒（`EVENT_BAR_TTL_MS`）后自动回落到上一条自动化结果，没有结果就收起；
+- 同一句话不会「顶部一条 + Toast 一条 + 底部一条」：页面在前台时不再弹 Toast，只有退到后台才用 Toast 兜底；
+- 文案里带「失败 / 错误 / 异常」的自动标红，跟自动化失败一个颜色。
+
 ### 界面列表（3.1.0+）
 
 整页只有一个 `RecyclerView`（`deviceRecyclerView`），「已保存设备 / 周围设备 / 非常用设备」三块列表和它们的标题行用 `ConcatAdapter` 拼在一起，一起滚 —— 以前是三个 `RecyclerView` 塞进 `ScrollView`、还要手工测量高度，嵌套滚动和空白高度的问题都是这么来的。
